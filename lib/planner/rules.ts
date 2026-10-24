@@ -1455,28 +1455,71 @@ function planEasyMinutes(slots: ArchSlot[], plan: RacePlanWeekInput, easyPace: n
   return Math.max(PLAN_EASY_MIN_MINUTES, Math.min(PLAN_EASY_MAX_MINUTES, round5(minutes)));
 }
 
+/** French note on a quality session replaced by an easy run because no day keeps it off the long run's neighbours. */
+const QUALITY_NEXT_TO_LONG_NOTE =
+  "Séance de qualité remplacée par un footing facile avec lignes droites : avec tes jours disponibles, elle tomberait la veille ou le lendemain de la sortie longue.";
+
 /**
- * Keeps quality inside [qualityFromDay, qualityUntilDay] and the long run on or before
- * longRunUntilDay (the post-race easy days and the pre-race windows): a misplaced session
- * swaps days with an easy session that fits, and failing that becomes an easy one.
- * Mutates `slots` and `days`.
+ * Race-plan day rules, applied after the usual placement:
+ * - quality stays inside [qualityFromDay, qualityUntilDay] (post-race easy days, pre-race window) and is
+ *   never the day before or after the long run;
+ * - the long run stays inside [longRunFromDay, longRunUntilDay].
+ * A misplaced session swaps days with an easy run that fits, or moves to a free available day; when
+ * neither exists a quality session becomes an easy run with strides (its index is returned, for the
+ * note) and a long run becomes an easy run. Mutates `slots` and `days`.
+ *
+ * `outsideLongDays` are long runs not in `slots` (last Sunday's, or one already done this week).
  */
-function enforcePlanDayLimits(slots: ArchSlot[], days: number[], plan: RacePlanWeekInput): void {
-  const from = plan.qualityFromDay;
-  const until = plan.qualityUntilDay ?? 6;
-  const longUntil = plan.longRunUntilDay ?? 6;
-  const fix = (i: number, fits: (d: number) => boolean) => {
-    if (fits(days[i])) return;
-    const j = slots.findIndex((s, k) => k !== i && s.role === "easy" && s.modality === slots[i].modality && fits(days[k]));
-    if (j !== -1) [days[i], days[j]] = [days[j], days[i]];
-    else slots[i] = { ...slots[i], role: "easy" };
+function enforcePlanDayLimits(
+  slots: ArchSlot[],
+  days: number[],
+  plannableDays: number[],
+  outsideLongDays: number[],
+  plan: RacePlanWeekInput
+): Set<number> {
+  const qualityFits = (d: number) => d >= plan.qualityFromDay && d <= (plan.qualityUntilDay ?? 6);
+  const longFits = (d: number) => d >= (plan.longRunFromDay ?? 0) && d <= (plan.longRunUntilDay ?? 6);
+  const longDays = () => [
+    ...outsideLongDays,
+    ...slots.flatMap((s, i) => (s.role === "long" && s.modality === "running" ? [days[i]] : [])),
+  ];
+  const nextToLong = (d: number) => longDays().some((l) => Math.abs(d - l) === 1);
+  const qualityOk = (d: number) => qualityFits(d) && !nextToLong(d);
+
+  /** Moves slot i onto a day satisfying `fits`: swap with an easy slot, else a free available day. */
+  const relocate = (i: number, fits: (d: number) => boolean, swapFits: (d: number) => boolean = () => true): boolean => {
+    if (fits(days[i])) return true;
+    const j = slots.findIndex(
+      (s, k) => k !== i && s.role === "easy" && s.modality === slots[i].modality && fits(days[k]) && swapFits(days[i])
+    );
+    if (j !== -1) {
+      [days[i], days[j]] = [days[j], days[i]];
+      return true;
+    }
+    const free = plannableDays.filter((d) => !days.includes(d) && fits(d)).sort((a, b) => a - b)[0];
+    if (free !== undefined) {
+      days[i] = free;
+      return true;
+    }
+    return false;
   };
+
+  // Long run first: the quality placement below depends on where it ends up.
   slots.forEach((s, i) => {
-    if (s.role === "quality") fix(i, (d) => d >= from && d <= until);
+    if (s.role === "long" && s.modality === "running" && !relocate(i, longFits)) slots[i] = { ...s, role: "easy" };
   });
+
+  const downgraded = new Set<number>();
   slots.forEach((s, i) => {
-    if (s.role === "long" && s.modality === "running") fix(i, (d) => d <= longUntil);
+    if (s.role !== "quality") return;
+    // A quality session moved off its day must not land its easy partner on a day the long run needs.
+    if (s.modality === "running" ? !relocate(i, qualityOk, longFits) : !relocate(i, qualityFits)) {
+      slots[i] = { ...s, role: "easy" };
+      // Only the adjacency case gets the note; a day-window miss (post-race easy days, pre-race window) is silent.
+      if (s.modality === "running" && qualityFits(days[i])) downgraded.add(i);
+    }
   });
+  return downgraded;
 }
 
 export function buildWeekPlan(input: PlannerInput): WeekPlan {
@@ -1592,7 +1635,15 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
         ...(longPos !== -1 ? [overriddenDays[longPos]] : []),
       ];
   const dayOffsets = avoidRunAfterLongRun(slots, overriddenDays, plannableDays, longDays, fixedSlots);
-  if (racePlan) enforcePlanDayLimits(slots, dayOffsets, racePlan);
+  const placementDowngraded = racePlan
+    ? enforcePlanDayLimits(
+        slots,
+        dayOffsets,
+        plannableDays,
+        [...(input.previousWeekLongRunOnSunday ? [-1] : []), ...(keptLong ? [keptLong.dayOffset] : [])],
+        racePlan
+      )
+    : new Set<number>();
   const keptIndoorRuns = keptSessions.filter((k) => k.modality === "running" && k.indoor).length;
   const indoorFlags = assignIndoor(slots, Math.max(0, indoorRuns - keptIndoorRuns));
 
@@ -1678,6 +1729,19 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
       if (decision.type === "rest") return buildRestSession(userId, plannedDate, "easy", decision.reason);
       // No strides the week after a race: easy only.
       const addStrides = !recovery && shouldAddStrides(signal);
+      // A quality session that couldn't keep off the long run's neighbouring days: easy + strides, with the reason.
+      if (placementDowngraded.has(i)) {
+        return buildEasySession(
+          userId,
+          plannedDate,
+          easyMinutes,
+          indoor,
+          calibration,
+          true,
+          role,
+          QUALITY_NEXT_TO_LONG_NOTE
+        );
+      }
       const easy = buildEasySession(userId, plannedDate, easyMinutes, indoor, calibration, addStrides, null, null);
       // Taper week: the plan's quality slot becomes an easy run with short race-pace reminders.
       return planned && open[i].slotIndex === planned.reminderSlot

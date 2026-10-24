@@ -183,6 +183,8 @@ export interface RacePlanWeekInput {
   qualityUntilDay?: number;
   /** Last day (0 = Monday) the long run may land on — before the 4-day pre-race window. */
   longRunUntilDay?: number;
+  /** First day (0 = Monday) the long run may land on — the week after a half or longer. */
+  longRunFromDay?: number;
   qualityLevel: number;
 }
 

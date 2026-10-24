@@ -50,8 +50,14 @@ export async function POST(req: NextRequest) {
     .select("id, name, race_date, result_time_s")
     .eq("user_id", userId);
   if (existingError) {
+    // Only a missing table/column means the migration hasn't run — not, say, a network failure.
+    const migrationMissing = ["42P01", "42703", "PGRST204", "PGRST205"].includes(existingError.code ?? "");
     return NextResponse.json(
-      { error: `${existingError.message} — apply the backward-planner migration in supabase/schema.sql first.` },
+      {
+        error: migrationMissing
+          ? `${existingError.message} — apply the backward-planner migration in supabase/schema.sql first.`
+          : existingError.message,
+      },
       { status: 500 }
     );
   }

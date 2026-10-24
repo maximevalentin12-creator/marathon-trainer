@@ -11,6 +11,7 @@
 // not counted in it.
 
 import { addDays, toMonday } from "./dates";
+import { RACE_PLAN_CONFIG as CFG, type DistanceClass } from "./config";
 
 export type RacePhase = "recovery" | "base" | "development" | "specific" | "taper" | "race";
 
@@ -86,6 +87,8 @@ export interface RacePlanWeek {
   longRunMpBlock: MpBlock | null;
   /** First day (0 = Monday) a quality session may land on — after a race's easy days; 0 = no restriction. */
   qualityFromDay: number;
+  /** First day (0 = Monday) the long run may land on — the week after a half or longer; 0 = no restriction. */
+  longRunFromDay: number;
 }
 
 export interface RacePlan {
@@ -96,60 +99,11 @@ export interface RacePlan {
   peakKm: number;
 }
 
-// ─── Tunables ──────────────────────────────────────────────────────────────
+// ─── Constants (the tunable ones live in config.ts) ────────────────────────
 
-type DistanceClass = "marathon" | "half" | "short";
-
-const PHASE_LENGTHS: Record<DistanceClass, { taper: number; specific: number; development: number }> = {
-  marathon: { taper: 2, specific: 5, development: 6 },
-  half: { taper: 1, specific: 4, development: 4 },
-  short: { taper: 1, specific: 3, development: 3 },
-};
-
-/** Weeks of lead time below which the plan warns (and compresses base first). */
-const MIN_LEAD_WEEKS: Record<DistanceClass, number> = { marathon: 12, half: 8, short: 6 };
-
-/** Weekly training-km ceiling per goal distance — a heuristic; never below the athlete's own baseline. */
-const VOLUME_CEILING_KM: Record<DistanceClass, number> = { marathon: 65, half: 50, short: 42 };
-const MAX_WEEKLY_INCREASE = 0.1;
-const DELOAD_FACTOR = 0.75;
-const MIN_LOAD_WEEKS_BEFORE_DELOAD = 2;
-
-const LONG_RUN_STEP_MIN = 10;
-const LONG_RUN_CAP_MIN = 180;
-const LONG_RUN_CAP_KM = 32;
-/** Peak long run per goal distance, under the global cap. */
-const LONG_RUN_PEAK_MIN: Record<DistanceClass, number> = { marathon: 180, half: 135, short: 105 };
-/** Long-run peaks fall this many weeks before race week. */
-const LONG_RUN_PEAK_WEEKS = [5, 3];
+/** Deload weeks and the other numbers below come from config.ts; these names keep the code short. */
+const DELOAD_FACTOR = CFG.deloadShare;
 const LONG_RUN_SHARE_NOTE_THRESHOLD = 0.4;
-/** A short tune-up week keeps its long run at this share of the planned one. */
-const TUNE_UP_LONG_RUN_SHARE = 0.6;
-
-/** Taper: share of the peak week's km. Keys are weeks before race week. */
-const TAPER_VOLUME: Record<DistanceClass, Record<number, number>> = {
-  marathon: { 2: 0.7, 1: 0.55 },
-  half: { 1: 0.7 },
-  short: { 1: 0.7 },
-};
-const RACE_WEEK_VOLUME: Record<DistanceClass, number> = { marathon: 0.4, half: 0.45, short: 0.45 };
-const TAPER_LONG_RUN_SHARE: Record<number, number> = { 2: 0.65, 1: 0.5 };
-
-/** The post-recovery rule: ceil(race km / 3) easy days after any race before quality. */
-const EASY_DAYS_PER_KM = 1 / 3;
-
-const RECOVERY_VOLUME_SHARE = [0.5, 0.7];
-const MP_BLOCK_START_KM = 6;
-const MP_BLOCK_END_KM = 16;
-const MP_BLOCK_MAX_STEP_KM = 4;
-const MP_BLOCK_SNAP: Array<{ km: number; block: MpBlock }> = [
-  { km: 6, block: { reps: 2, kmEach: 3 } },
-  { km: 8, block: { reps: 2, kmEach: 4 } },
-  { km: 10, block: { reps: 2, kmEach: 5 } },
-  { km: 12, block: { reps: 2, kmEach: 6 } },
-  { km: 14, block: { reps: 2, kmEach: 7 } },
-  { km: 16, block: { reps: 2, kmEach: 8 } },
-];
 
 /** The planner puts the long run on Saturday (rules.ts assignDaysToSlots). */
 const LONG_RUN_DAY = 5;
@@ -191,12 +145,7 @@ function daysBetween(a: Date, b: Date): number {
 
 /** Day (UTC midnight) from which quality is allowed again after a race: raceDate + ceil(km/3) easy days + 1. */
 function qualityAllowedFrom(raceDate: Date, distanceKm: number): Date {
-  return addDays(raceDate, Math.ceil(distanceKm * EASY_DAYS_PER_KM) + 1);
-}
-
-function snapMpBlock(km: number): MpBlock {
-  const nearest = MP_BLOCK_SNAP.reduce((best, s) => (Math.abs(s.km - km) < Math.abs(best.km - km) ? s : best));
-  return nearest.block;
+  return addDays(raceDate, Math.ceil(distanceKm * CFG.easyDaysPerKm) + 1);
 }
 
 /** Baseline: median weekly running km of the 4 full weeks before the plan starts, flagged weeks excluded. */
@@ -239,9 +188,9 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
   }
 
   const leadWeeks = Math.ceil(daysBetween(history.today, goalRace.raceDate) / 7);
-  if (leadWeeks < MIN_LEAD_WEEKS[klass]) {
+  if (leadWeeks < CFG.minLeadWeeks[klass]) {
     warnings.push(
-      `Préparation courte : ${leadWeeks} semaines avant la course, ${MIN_LEAD_WEEKS[klass]} recommandées. ` +
+      `Préparation courte : ${leadWeeks} semaines avant la course, ${CFG.minLeadWeeks[klass]} recommandées. ` +
         "La base est raccourcie en premier."
     );
   }
@@ -264,20 +213,22 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
   }
 
   // Skeleton: phase, deload, races per week.
-  const lengths = PHASE_LENGTHS[klass];
+  const lengths = CFG.phaseWeeks[klass];
+  // The marathon's race week is the 2nd taper week: only the weeks before it are "taper" weeks.
+  const taperWeeks = lengths.taper - (CFG.raceWeekCountsAsTaper[klass] ? 1 : 0);
   const goalSet = [goalRace, ...tuneUps];
   const weeks: RacePlanWeek[] = Array.from({ length: weekCount }, (_, i) => {
     const n = weekCount - 1 - i;
     const weekStart = addDays(planStart, 7 * i);
     let phase: RacePhase;
     if (n === 0) phase = "race";
-    else if (n <= lengths.taper) phase = "taper";
-    else if (n <= lengths.taper + lengths.specific) phase = "specific";
-    else if (n <= lengths.taper + lengths.specific + lengths.development) phase = "development";
+    else if (n <= taperWeeks) phase = "taper";
+    else if (n <= taperWeeks + lengths.specific) phase = "specific";
+    else if (n <= taperWeeks + lengths.specific + lengths.development) phase = "development";
     else phase = "base";
     if (i < recoveryWeeks && n > 0) phase = "recovery";
     // Every 4th week back from the race — but never before two load weeks have been built after recovery.
-    const isDeload = n > 0 && n % 4 === 0 && phase !== "recovery" && i - recoveryWeeks >= MIN_LOAD_WEEKS_BEFORE_DELOAD;
+    const isDeload = n > 0 && n % 4 === 0 && phase !== "recovery" && i - recoveryWeeks >= CFG.minLoadWeeksBeforeDeload;
     return {
       weekStart,
       phase,
@@ -293,26 +244,27 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
       qualityLevel: 0,
       longRunMpBlock: null,
       qualityFromDay: 0,
+      longRunFromDay: 0,
     };
   });
 
   const isLoad = (w: RacePlanWeek) => !["recovery", "taper", "race"].includes(w.phase) && !w.isDeload;
 
   // ── Volume: ramp from the baseline to the ceiling, ≤ +10 %/week, deload at 75 % ──
-  const ceiling = Math.max(VOLUME_CEILING_KM[klass], baseline);
+  const ceiling = Math.max(CFG.volumeCeilingKm[klass], baseline);
   const loadWeeks = weeks.filter(isLoad);
   let lastLoadKm = baseline;
   let loadIndex = 0;
   for (const w of weeks) {
     if (w.phase === "recovery") {
       const idx = weeks.filter((x) => x.phase === "recovery").indexOf(w);
-      w.targetKm = Math.round(baseline * RECOVERY_VOLUME_SHARE[Math.min(idx, RECOVERY_VOLUME_SHARE.length - 1)]);
+      w.targetKm = Math.round(baseline * CFG.recoveryVolumeShare[Math.min(idx, CFG.recoveryVolumeShare.length - 1)]);
     } else if (w.isDeload) {
       w.targetKm = Math.round(lastLoadKm * DELOAD_FACTOR);
     } else if (isLoad(w)) {
       const t = loadWeeks.length > 1 ? loadIndex / (loadWeeks.length - 1) : 1;
       const desired = baseline + (ceiling - baseline) * t;
-      const capped = loadIndex === 0 ? baseline : Math.min(desired, lastLoadKm * (1 + MAX_WEEKLY_INCREASE));
+      const capped = loadIndex === 0 ? baseline : Math.min(desired, lastLoadKm * (1 + CFG.maxWeeklyIncrease));
       lastLoadKm = Math.min(ceiling, capped);
       w.targetKm = Math.round(lastLoadKm);
       w.qualityLevel = Math.min(6, Math.floor(loadIndex / 2));
@@ -323,18 +275,19 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
 
   for (const w of weeks) {
     const n = w.weeksToRace;
-    if (w.phase === "race") w.targetKm = Math.round(peakKm * RACE_WEEK_VOLUME[klass]);
-    else if (w.phase === "taper") w.targetKm = Math.round(peakKm * (TAPER_VOLUME[klass][n] ?? 0.7));
+    if (w.phase === "race") w.targetKm = Math.round(peakKm * CFG.raceWeekVolumeShare[klass]);
+    else if (w.phase === "taper") w.targetKm = Math.round(peakKm * (CFG.taperVolumeShare[klass][n] ?? 0.7));
   }
 
   // ── Long run: anchor → peak (at 5 and 3 weeks out), +10 min per load week at most ──
+  const peakWeeks = CFG.longRunPeakWeeks[klass];
   const peakLongMin = Math.min(
-    LONG_RUN_CAP_MIN,
-    LONG_RUN_PEAK_MIN[klass],
-    Math.floor(((LONG_RUN_CAP_KM * easyPace) / 60) / 5) * 5
+    CFG.longRunCapMin,
+    CFG.longRunPeakMin[klass],
+    Math.floor((CFG.longRunCapKm * easyPace) / 60 / 5) * 5
   );
-  const rampWeeks = weeks.filter((w) => isLoad(w) && w.weeksToRace >= LONG_RUN_PEAK_WEEKS[0]);
-  const reachable = anchor + LONG_RUN_STEP_MIN * Math.max(0, rampWeeks.length - 1);
+  const rampWeeks = weeks.filter((w) => isLoad(w) && w.weeksToRace >= peakWeeks[0]);
+  const reachable = anchor + CFG.longRunStepMin * Math.max(0, rampWeeks.length - 1);
   const peakLong = Math.max(anchor, Math.min(peakLongMin, reachable));
   let lastLoadLong = anchor;
   let rampIndex = 0;
@@ -344,14 +297,14 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
       const first = weeks.findIndex((x) => x.phase === "recovery") === weeks.indexOf(w);
       w.longRunMin = first ? 0 : Math.min(60, round5(anchor * 0.5));
     } else if (w.phase === "taper") {
-      w.longRunMin = round5(peakLong * (TAPER_LONG_RUN_SHARE[n] ?? 0.5));
+      w.longRunMin = round5(peakLong * (CFG.taperLongRunShare[n] ?? 0.5));
     } else if (w.phase === "race") {
       w.longRunMin = 0;
     } else if (w.isDeload) {
       w.longRunMin = round5(lastLoadLong * DELOAD_FACTOR);
-    } else if (LONG_RUN_PEAK_WEEKS.includes(n)) {
+    } else if (peakWeeks.includes(n)) {
       w.longRunMin = lastLoadLong = peakLong;
-    } else if (n > LONG_RUN_PEAK_WEEKS[0]) {
+    } else if (n > peakWeeks[0]) {
       const t = rampWeeks.length > 1 ? rampIndex / (rampWeeks.length - 1) : 1;
       w.longRunMin = lastLoadLong = round5(anchor + (peakLong - anchor) * t);
       rampIndex++;
@@ -373,6 +326,32 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
         .map((r) => daysBetween(w.weekStart, qualityAllowedFrom(r.raceDate, r.distanceKm)))
     );
     w.qualityFromDay = Math.min(7, from);
+
+    // The week after a half or longer: easy only, and one easy long run (no MP) from day 6 after the race.
+    // It applies when the week's long run (Saturday) falls within 6 days after the race.
+    const longDay = addDays(w.weekStart, LONG_RUN_DAY);
+    const recent = finishedRaces
+      .filter(
+        (r) =>
+          r.distanceKm >= CFG.postRaceMinKm &&
+          r.raceDate < w.weekStart &&
+          daysBetween(r.raceDate, longDay) <= CFG.postRaceLongRunFromDay
+      )
+      .sort((a, b) => b.raceDate.getTime() - a.raceDate.getTime())[0];
+    if (recent) {
+      const fromDay = daysBetween(w.weekStart, addDays(recent.raceDate, CFG.postRaceLongRunFromDay));
+      w.longRunFromDay = Math.max(0, fromDay);
+      if (w.longRunMin > 0) {
+        if (fromDay > 6) {
+          w.longRunMin = 0;
+        } else {
+          w.longRunMin = Math.min(w.longRunMin, CFG.postRaceLongRunMaxMin);
+          w.notes.push(
+            `Semaine après une course de ${recent.distanceKm} km : footings faciles uniquement, une seule sortie longue facile (≤ ${CFG.postRaceLongRunMaxMin / 60} h) à partir du jour ${CFG.postRaceLongRunFromDay} après la course.`
+          );
+        }
+      }
+    }
   }
 
   // A race week runs the race-week template (rules.ts): two short easy runs around the race, the long
@@ -413,9 +392,9 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
         w.longRunMin = 0;
         w.notes.push("Pas de sortie longue : la course tombe trop tôt dans la semaine (rien dans les 4 jours avant).");
       } else {
-        w.longRunMin = round5(w.longRunMin * TUNE_UP_LONG_RUN_SHARE);
+        w.longRunMin = round5(w.longRunMin * CFG.tuneUpLongRunShare);
         w.notes.push(
-          `Sortie longue allégée (${Math.round(TUNE_UP_LONG_RUN_SHARE * 100)} %), au plus tard ${LONG_RUN_DAYS_BEFORE_RACE} jours avant la course, jamais après.`
+          `Sortie longue allégée (${Math.round(CFG.tuneUpLongRunShare * 100)} %), au plus tard ${LONG_RUN_DAYS_BEFORE_RACE} jours avant la course, jamais après.`
         );
       }
     }
@@ -439,17 +418,13 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
     }
     if (w.phase === "race") continue;
     if (w.phase === "taper") {
-      if (n === 1) {
-        w.keySession = "mp_reminder";
-        w.notes.push(
-          klass === "marathon"
-            ? "Affûtage : footing avec quelques rappels courts à allure marathon + lignes droites. Rien de dur."
-            : "Affûtage : footing avec quelques rappels courts à allure course + lignes droites. Rien de dur."
-        );
-      } else {
-        w.keySession = "threshold";
-        w.notes.push(`Affûtage (S-${n}) : séance de seuil courte, ≈ ${Math.round((TAPER_VOLUME[klass][n] ?? 0.7) * 100)} % du pic de volume.`);
-      }
+      w.keySession = "mp_reminder";
+      w.notes.push(
+        (klass === "marathon"
+          ? "Affûtage : footing avec quelques rappels courts à allure marathon + lignes droites. Rien de dur."
+          : "Affûtage : footing avec quelques rappels courts à allure course + lignes droites. Rien de dur.") +
+          ` ≈ ${Math.round((CFG.taperVolumeShare[klass][n] ?? 0.7) * 100)} % du pic de volume.`
+      );
       continue;
     }
     if (w.isDeload) {
@@ -472,30 +447,27 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
   }
 
   // ── Marathon-pace blocks in the long run (marathon, specific phase) ──
+  // Blocks count as quality: a week holding a race, a deload, or inside a post-race easy window gets none.
   if (klass === "marathon") {
-    const eligible = weeks.filter(
-      (w) => w.phase === "specific" && !w.isDeload && w.longRunMin > 0 && w.raceIds.length === 0
-    );
-    // The long run lands on Saturday (day 5): the post-race easy days must be over by then.
-    const usable = eligible.filter((w) => w.qualityFromDay <= LONG_RUN_DAY);
-    let km = MP_BLOCK_START_KM;
-    usable.forEach((w, i) => {
-      const target = usable.length > 1 ? MP_BLOCK_START_KM + ((MP_BLOCK_END_KM - MP_BLOCK_START_KM) * i) / (usable.length - 1) : MP_BLOCK_START_KM;
-      km = Math.min(target, km + (i === 0 ? 0 : MP_BLOCK_MAX_STEP_KM));
-      w.longRunMpBlock = snapMpBlock(km);
-      const total = w.longRunMpBlock.reps * w.longRunMpBlock.kmEach;
-      w.notes.push(`Sortie longue avec ${w.longRunMpBlock.reps} × ${w.longRunMpBlock.kmEach} km à allure marathon (${total} km au total).`);
-    });
-    const peakMp = Math.max(0, ...usable.map((w) => (w.longRunMpBlock ? w.longRunMpBlock.reps * w.longRunMpBlock.kmEach : 0)));
-    if (peakMp < MP_BLOCK_END_KM - 2) {
+    const ladder = CFG.mpBlock.kmByWeeksToRace;
+    let peakMp = 0;
+    for (const w of weeks) {
+      const km = ladder[w.weeksToRace];
+      if (w.phase !== "specific" || w.isDeload || w.raceIds.length > 0 || w.longRunMin <= 0 || km === undefined) continue;
+      if (w.longRunFromDay > 0 || w.qualityFromDay > LONG_RUN_DAY) continue;
+      w.longRunMpBlock = CFG.mpBlock.blocks[km];
+      peakMp = Math.max(peakMp, km);
+      w.notes.push(`Sortie longue avec ${w.longRunMpBlock.reps} × ${w.longRunMpBlock.kmEach} km à allure marathon (${km} km au total).`);
+    }
+    if (peakMp < CFG.mpBlock.targetPeakKm) {
       warnings.push(
-        `Le calendrier ne laisse que ${usable.length} sortie(s) longue(s) avec allure marathon : le bloc maximal est de ${peakMp} km ` +
-          `(cible 14–16 km). Les courses intermédiaires et leurs jours faciles occupent les autres semaines.`
+        `Le bloc maximal à allure marathon est de ${peakMp} km (cible ${CFG.mpBlock.targetPeakKm} km) : ` +
+          "les courses intermédiaires et leurs jours faciles occupent les semaines voulues."
       );
     }
     for (const w of weeks) {
       if (w.phase === "specific" && !w.isDeload && !w.longRunMpBlock && w.longRunMin > 0) {
-        w.notes.push("Sortie longue facile : pas de bloc allure marathon (jours faciles après une course).");
+        w.notes.push("Sortie longue facile : pas de bloc allure marathon.");
       }
     }
   }
@@ -504,7 +476,7 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
   for (const w of weeks) {
     const n = w.weeksToRace;
     if (w.isDeload) w.notes.push("Semaine de décharge : 75 % du volume et de la sortie longue.");
-    if (LONG_RUN_PEAK_WEEKS.includes(n) && w.longRunMin > 0) w.notes.push(`Pic de sortie longue (S-${n}).`);
+    if (peakWeeks.includes(n) && w.longRunMin > 0) w.notes.push(`Pic de sortie longue (S-${n}).`);
     const longKm = (w.longRunMin * 60) / easyPace;
     if (w.targetKm > 0 && longKm / w.targetKm > LONG_RUN_SHARE_NOTE_THRESHOLD) {
       w.notes.push(
@@ -512,8 +484,8 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
       );
     }
   }
-  if (peakLong < Math.min(peakLongMin, LONG_RUN_CAP_MIN)) {
-    warnings.push(`Sortie longue maximale limitée à ${peakLong} min : +${LONG_RUN_STEP_MIN} min par semaine de charge depuis ${anchor} min.`);
+  if (peakLong < peakLongMin) {
+    warnings.push(`Sortie longue maximale limitée à ${peakLong} min : +${CFG.longRunStepMin} min par semaine de charge depuis ${anchor} min.`);
   }
 
   return { weeks, warnings, baselineKm: Math.round(baseline * 10) / 10, longRunAnchorMin: anchor, peakKm };

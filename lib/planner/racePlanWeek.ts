@@ -131,6 +131,7 @@ export function resolveRacePlanWeek(params: RacePlanWeekParams): ResolvedRacePla
     qualityFromDay: week.qualityFromDay,
     qualityUntilDay: untilDay(QUALITY_DAYS_BEFORE_RACE),
     longRunUntilDay: untilDay(LONG_RUN_DAYS_BEFORE_RACE),
+    longRunFromDay: week.longRunFromDay,
     qualityLevel: week.qualityLevel,
   };
 
