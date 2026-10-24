@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Environment variables — never commit these
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+
+# Claude Code local settings
+.claude/
+
+# Editor
+.vscode/
+.idea/
+
+# Environment variants (keep the example file)
+.env*
+!.env.local.example
+
+# Personal data exports and generated artefacts
+*.csv
+*.pdf
+
+# Personal working notes / audits / scratch (kept locally, never published)
+audit-inventory.md
+synthese-methodologique-*.md
+scratch/
+scratch-*
+*.scratch.*
+debug-*.md
+prompt-*.md
+CLAUDE.md
+.claude/
+
+# Shoe photos (kept locally; seed falls back to placeholder.svg)
+public/shoes/*.png

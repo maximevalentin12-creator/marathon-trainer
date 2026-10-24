@@ -1,0 +1,7 @@
+# >=0.3.2: mobile SSO / DI OAuth Bearer token auth flow. Older versions used a
+# different token format (garth-style OAuth1/OAuth2 session files) that is NOT
+# compatible with the Supabase-stored token_payload this script now reads/writes —
+# see scripts/sync_garmin.py and supabase/schema.sql's garmin_tokens table.
+garminconnect>=0.3.2
+supabase>=2.0.0
+python-dotenv>=1.0.0
