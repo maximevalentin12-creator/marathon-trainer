@@ -80,5 +80,5 @@ export {
   LONG_RUN_PROOF_KM,
 } from "./paces";
 export type { RaceResult, RacePredictions, TrainingPaces } from "./paces";
-export { resolveRacePlanWeek, activeGoalRace, goalRecoveryMode, trainingPhaseOf } from "./racePlanWeek";
+export { resolveRacePlanWeek, activeGoalRace, goalRecoveryMode, trainingPhaseOf, isRaceActivity } from "./racePlanWeek";
 export type { ResolvedRacePlanWeek, RacePlanWeekParams } from "./racePlanWeek";

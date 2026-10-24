@@ -153,6 +153,8 @@ export interface RaceModeInput {
   raceWeekLongRunMinutes?: number;
   /** Pace (sec/km) of the short reminders in the race week's first easy run (marathon / half pace); absent = none. */
   reminderPaceSecPerKm?: number;
+  /** Km of running planned around the race(s) this week (long run included, races not) — sizes the easy runs; absent = the fixed 30 / 20 min runs. */
+  trainingKm?: number;
 }
 
 /**
@@ -173,7 +175,8 @@ export interface RacePlanWeekInput {
     | "mp_reminder"
     | "race"
     | "time_trial"
-    | "long_tempo";
+    | "long_tempo"
+    | "strides";
   isDeload: boolean;
   /** MP blocks inside the long run (marathon specific phase). */
   longRunMpBlock: { reps: number; kmEach: number } | null;

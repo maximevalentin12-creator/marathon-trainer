@@ -14,6 +14,7 @@ import {
   longestRunMinutes,
   raceModeForWeek,
   resolveRacePlanWeek,
+  isRaceActivity,
   goalRecoveryMode,
   trainingPhaseOf,
   RACE_PAIN_WARNING_MIN_SCORE,
@@ -150,7 +151,7 @@ export async function regenerateWeekSessions(
   activityCutoff.setUTCDate(activityCutoff.getUTCDate() - 84);
   const { data: activities, error: activitiesError } = await db
     .from("garmin_activities")
-    .select("start_time, duration_seconds, distance_meters, activity_type")
+    .select("start_time, duration_seconds, distance_meters, activity_type, event_type:raw_data->eventType->>typeKey")
     .eq("user_id", userId)
     .gte("start_time", activityCutoff.toISOString());
   if (activitiesError) return { error: activitiesError.message, status: 500 };
@@ -222,12 +223,17 @@ export async function regenerateWeekSessions(
     races,
     weekStart,
     today,
-    activities: (activities ?? []).map((a) => ({
-      startTime: new Date(a.start_time),
-      distanceKm: (a.distance_meters ?? 0) / 1000,
-      durationMinutes: (a.duration_seconds ?? 0) / 60,
-      activityType: a.activity_type,
-    })),
+    activities: (activities ?? []).map((a) => {
+      const startTime = new Date(a.start_time);
+      const distanceKm = (a.distance_meters ?? 0) / 1000;
+      return {
+        startTime,
+        distanceKm,
+        durationMinutes: (a.duration_seconds ?? 0) / 60,
+        activityType: a.activity_type,
+        isRace: isRaceActivity({ startTime, distanceKm, eventType: (a as { event_type?: string | null }).event_type }, races),
+      };
+    }),
     flaggedDates: (flagRows ?? []).map((r) => parseIsoDate(r.entry_date)),
     easyPaceSecPerKm: baseCalibration.easyPaceSecPerKm,
   });

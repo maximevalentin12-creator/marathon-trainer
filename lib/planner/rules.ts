@@ -747,6 +747,8 @@ const RACE_MODE_MIN_EASY_MINUTES = 20;
 /** Race week: two short easy runs, then nothing hard and full rest on the days before the race. */
 const RACE_WEEK_FIRST_EASY_MINUTES = 30;
 const RACE_WEEK_STRIDES_EASY_MINUTES = 20;
+/** Upper bound of an easy run in a race week sized from the plan's km. */
+const RACE_WEEK_MAX_EASY_MINUTES = 60;
 const RACE_WEEK_STRIDE_REPS = 4;
 const RACE_WEEK_NON_IMPACT_MINUTES = 30;
 const RACE_WEEK_REST_DAYS_BEFORE = 2;
@@ -935,6 +937,20 @@ function buildRaceWeekPlan(input: PlannerInput, raceMode: RaceModeInput): WeekPl
   const keptIndoorRuns = keptSessions.filter((k) => k.modality === "running" && k.indoor).length;
   let indoorLeft = Math.max(0, Math.min(input.indoorRuns, input.runsPerWeek) - keptIndoorRuns);
 
+  // Easy-run length: the fixed 30 / 20 min, or — when the plan gives the week's running km — what is left
+  // of it after the long run, shared between the easy runs.
+  let firstEasyMinutes = RACE_WEEK_FIRST_EASY_MINUTES;
+  let stridesEasyMinutes = RACE_WEEK_STRIDES_EASY_MINUTES;
+  if (raceMode.trainingKm !== undefined && runDays.length > 0) {
+    const longKm = longDay !== undefined ? stepKm(raceMode.raceWeekLongRunMinutes ?? 0, calibration.easyPaceSecPerKm) : 0;
+    const perRunKm = Math.max(0, raceMode.trainingKm - longKm) / runDays.length;
+    const minutes = Math.max(
+      RACE_MODE_MIN_EASY_MINUTES,
+      Math.min(RACE_WEEK_MAX_EASY_MINUTES, round5((perRunKm * calibration.easyPaceSecPerKm) / 60))
+    );
+    firstEasyMinutes = stridesEasyMinutes = minutes;
+  }
+
   const sessions: PlannedSession[] = [];
   const slotIndices: number[] = [];
   beforeRace.forEach((slotIndex, pos) => {
@@ -982,7 +998,7 @@ function buildRaceWeekPlan(input: PlannerInput, raceMode: RaceModeInput): WeekPl
       const easy = buildEasySession(
         userId,
         plannedDate,
-        strides ? RACE_WEEK_STRIDES_EASY_MINUTES : RACE_WEEK_FIRST_EASY_MINUTES,
+        strides ? stridesEasyMinutes : firstEasyMinutes,
         indoor,
         calibration,
         false,
@@ -1460,7 +1476,7 @@ const QUALITY_NEXT_TO_LONG_NOTE =
   "Séance de qualité remplacée par un footing facile avec lignes droites : avec tes jours disponibles, elle tomberait la veille ou le lendemain de la sortie longue.";
 
 /**
- * Race-plan day rules, applied after the usual placement:
+ * Day rules, applied after the usual placement (race-plan limits only when a plan is given):
  * - quality stays inside [qualityFromDay, qualityUntilDay] (post-race easy days, pre-race window) and is
  *   never the day before or after the long run;
  * - the long run stays inside [longRunFromDay, longRunUntilDay].
@@ -1475,10 +1491,10 @@ function enforcePlanDayLimits(
   days: number[],
   plannableDays: number[],
   outsideLongDays: number[],
-  plan: RacePlanWeekInput
+  plan: RacePlanWeekInput | null
 ): Set<number> {
-  const qualityFits = (d: number) => d >= plan.qualityFromDay && d <= (plan.qualityUntilDay ?? 6);
-  const longFits = (d: number) => d >= (plan.longRunFromDay ?? 0) && d <= (plan.longRunUntilDay ?? 6);
+  const qualityFits = (d: number) => d >= (plan?.qualityFromDay ?? 0) && d <= (plan?.qualityUntilDay ?? 6);
+  const longFits = (d: number) => d >= (plan?.longRunFromDay ?? 0) && d <= (plan?.longRunUntilDay ?? 6);
   const longDays = () => [
     ...outsideLongDays,
     ...slots.flatMap((s, i) => (s.role === "long" && s.modality === "running" ? [days[i]] : [])),
@@ -1635,15 +1651,13 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
         ...(longPos !== -1 ? [overriddenDays[longPos]] : []),
       ];
   const dayOffsets = avoidRunAfterLongRun(slots, overriddenDays, plannableDays, longDays, fixedSlots);
-  const placementDowngraded = racePlan
-    ? enforcePlanDayLimits(
-        slots,
-        dayOffsets,
-        plannableDays,
-        [...(input.previousWeekLongRunOnSunday ? [-1] : []), ...(keptLong ? [keptLong.dayOffset] : [])],
-        racePlan
-      )
-    : new Set<number>();
+  const placementDowngraded = enforcePlanDayLimits(
+    slots,
+    dayOffsets,
+    plannableDays,
+    [...(input.previousWeekLongRunOnSunday ? [-1] : []), ...(keptLong ? [keptLong.dayOffset] : [])],
+    racePlan
+  );
   const keptIndoorRuns = keptSessions.filter((k) => k.modality === "running" && k.indoor).length;
   const indoorFlags = assignIndoor(slots, Math.max(0, indoorRuns - keptIndoorRuns));
 
@@ -1728,7 +1742,7 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
       const decision = decideDowngrade("easy", signal);
       if (decision.type === "rest") return buildRestSession(userId, plannedDate, "easy", decision.reason);
       // No strides the week after a race: easy only.
-      const addStrides = !recovery && shouldAddStrides(signal);
+      const addStrides = !recovery && (shouldAddStrides(signal) || racePlan?.keySession === "strides");
       // A quality session that couldn't keep off the long run's neighbouring days: easy + strides, with the reason.
       if (placementDowngraded.has(i)) {
         return buildEasySession(

@@ -86,6 +86,26 @@ function reminderPace(goalKm: number, paces: TrainingPaces): number | undefined 
   return undefined;
 }
 
+/** Share of a race's distance an activity may differ by and still count as that race. */
+const RACE_MATCH_DISTANCE_TOLERANCE = 0.2;
+
+/**
+ * Whether an activity is a race: Garmin flagged it as one (eventType 'race'), or it sits on a
+ * races row's date at about its distance. Races never count toward the long-run anchor.
+ */
+export function isRaceActivity(
+  activity: { startTime: Date; distanceKm: number; eventType?: string | null },
+  races: Race[]
+): boolean {
+  if (activity.eventType === "race") return true;
+  const day = activity.startTime.toISOString().slice(0, 10);
+  return races.some(
+    (r) =>
+      r.raceDate.toISOString().slice(0, 10) === day &&
+      Math.abs(activity.distanceKm - r.distanceKm) <= r.distanceKm * RACE_MATCH_DISTANCE_TOLERANCE
+  );
+}
+
 export function resolveRacePlanWeek(params: RacePlanWeekParams): ResolvedRacePlanWeek | null {
   const { races, weekStart, today, activities, flaggedDates, easyPaceSecPerKm } = params;
   const goal = activeGoalRace(races, weekStart);
@@ -147,6 +167,7 @@ export function resolveRacePlanWeek(params: RacePlanWeekParams): ResolvedRacePla
       peakLongRunMinutes: 0,
       soloTest: race.bibStatus === "solo_test",
       raceWeekLongRunMinutes: week.longRunMin > 0 ? week.longRunMin : undefined,
+      trainingKm: Math.max(0, week.targetKm - week.raceKm),
       reminderPaceSecPerKm: race.id === goal.id && paces ? reminderPace(goal.distanceKm, paces) : undefined,
     };
   }

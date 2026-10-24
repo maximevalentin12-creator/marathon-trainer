@@ -32,8 +32,15 @@ export const RACE_PLAN_CONFIG = {
     half: { 1: 0.7 },
     short: { 1: 0.7 },
   } as Record<DistanceClass, Record<number, number>>,
-  /** Race week's training km as a share of the peak week's — never above 0.5. */
+  /** Goal race week's TRAINING km (the race itself not counted) as a share of the peak week's — never above 0.5. */
   raceWeekVolumeShare: { marathon: 0.45, half: 0.45, short: 0.45 } as Record<DistanceClass, number>,
+  /**
+   * The marathon's week -2 is a reduced week: at most this share of the peak km, with the long run
+   * (and its MP block) as its only quality — midweek is easy + strides.
+   */
+  reducedWeek: { marathon: { weeksToRace: 2, shareOfPeak: 0.85 } } as Partial<
+    Record<DistanceClass, { weeksToRace: number; shareOfPeak: number }>
+  >,
   /** Taper weeks' long run as a share of the peak long run, by weeks to race. */
   taperLongRunShare: { 1: 0.5 } as Record<number, number>,
 
@@ -56,6 +63,17 @@ export const RACE_PLAN_CONFIG = {
   longRunPeakWeeks: { marathon: [5, 2], half: [5, 3], short: [5, 3] } as Record<DistanceClass, number[]>,
   /** A tune-up under a half marathon keeps its long run at this share. */
   tuneUpLongRunShare: 0.6,
+
+  /** Long run's hard cap as a share of the week's km, by phase. When it binds the long run shrinks, never the week's km. */
+  longRunMaxShareOfWeek: { base: 0.4, development: 0.4, specific: 0.45 } as Record<"base" | "development" | "specific", number>,
+  /** After recovery weeks the long run resumes at this share of the anchor (the longest non-race run of 12 weeks). */
+  resumeLongRunShare: 0.9,
+
+  // ── Race weeks (volumes INCLUDE the race distance) ────────────────────
+  /** A tune-up week's km (race included) as a share of the previous full week: under a half / a half or longer. */
+  tuneUpWeekShare: { short: 0.85, half: 0.7 },
+  /** The week after a half or longer: at most this share of the last full week, all easy. */
+  postRaceWeekMaxShare: 0.7,
 
   // ── After a race ──────────────────────────────────────────────────────
   /** ceil(race km / 3) easy days after any race before quality — MP blocks count as quality. */
