@@ -22,19 +22,48 @@ export interface RaceRow {
   name: string;
   race_date: string;
   distance_km: number;
+  // Backward-planner columns — absent until that migration is applied.
+  kind?: "goal" | "tune_up";
+  parent_race_id?: string | null;
+  bib_status?: "confirmed" | "pending" | "solo_test";
+  target_time_s?: number | null;
+  result_time_s?: number | null;
 }
 
+const RACE_COLUMNS = "id, name, race_date, distance_km";
+const PLANNER_RACE_COLUMNS = `${RACE_COLUMNS}, kind, parent_race_id, bib_status, target_time_s, result_time_s`;
+/** Postgres "undefined_column". */
+const UNDEFINED_COLUMN = "42703";
+
 export function raceFromRow(row: RaceRow): Race {
-  return { id: row.id, name: row.name, raceDate: parseIsoDate(row.race_date), distanceKm: Number(row.distance_km) };
+  return {
+    id: row.id,
+    name: row.name,
+    raceDate: parseIsoDate(row.race_date),
+    distanceKm: Number(row.distance_km),
+    kind: row.kind ?? "goal",
+    parentRaceId: row.parent_race_id ?? null,
+    bibStatus: row.bib_status ?? "confirmed",
+    targetTimeSeconds: row.target_time_s ?? null,
+    resultTimeSeconds: row.result_time_s ?? null,
+  };
 }
 
 /** All the user's races, oldest first. Empty (with a warning) until the races migration is applied. */
 export async function loadRaces(db: ServiceClient, userId: string): Promise<Race[]> {
-  const { data, error } = await db
+  let { data, error } = (await db
     .from("races")
-    .select("id, name, race_date, distance_km")
+    .select(PLANNER_RACE_COLUMNS)
     .eq("user_id", userId)
-    .order("race_date", { ascending: true });
+    .order("race_date", { ascending: true })) as { data: RaceRow[] | null; error: { code?: string; message: string } | null };
+  if (error?.code === UNDEFINED_COLUMN) {
+    // The backward-planner migration hasn't run: the original columns still work (race mode only).
+    ({ data, error } = (await db
+      .from("races")
+      .select(RACE_COLUMNS)
+      .eq("user_id", userId)
+      .order("race_date", { ascending: true })) as { data: RaceRow[] | null; error: { code?: string; message: string } | null });
+  }
   if (error) {
     if (error.code && MISSING_TABLE_CODES.has(error.code)) {
       console.warn("races table missing — race mode off until the migration in supabase/schema.sql is applied.");
@@ -85,7 +114,18 @@ export async function attachRacePainWarnings<T extends { session_type?: unknown;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DISTANCE_KM = 400;
 
-type RaceColumns = { name?: string; race_date?: string; distance_km?: number };
+type RaceColumns = {
+  name?: string;
+  race_date?: string;
+  distance_km?: number;
+  kind?: "goal" | "tune_up";
+  parent_race_id?: string | null;
+  bib_status?: "confirmed" | "pending" | "solo_test";
+  target_time_s?: number | null;
+  result_time_s?: number | null;
+};
+
+const BIB_STATUSES = ["confirmed", "pending", "solo_test"] as const;
 
 /**
  * Checks the name/raceDate/distanceKm fields of a race request body and maps
@@ -113,7 +153,35 @@ export function validateRaceFields(
     if (typeof km !== "number" || !Number.isFinite(km) || km <= 0 || km > MAX_DISTANCE_KM) {
       return { error: `distanceKm must be a number between 0 and ${MAX_DISTANCE_KM}.` };
     }
-    values.distance_km = Math.round(km * 100) / 100;
+    values.distance_km = Math.round(km * 1000) / 1000;
+  }
+
+  if ("kind" in body) {
+    if (body.kind !== "goal" && body.kind !== "tune_up") return { error: "kind must be goal or tune_up." };
+    values.kind = body.kind;
+  }
+  if ("parentRaceId" in body) {
+    if (body.parentRaceId !== null && typeof body.parentRaceId !== "string") {
+      return { error: "parentRaceId must be a race id or null." };
+    }
+    values.parent_race_id = body.parentRaceId;
+  }
+  if ("bibStatus" in body) {
+    if (!(BIB_STATUSES as readonly unknown[]).includes(body.bibStatus)) {
+      return { error: "bibStatus must be confirmed, pending or solo_test." };
+    }
+    values.bib_status = body.bibStatus as (typeof BIB_STATUSES)[number];
+  }
+  for (const [field, column] of [
+    ["targetTimeS", "target_time_s"],
+    ["resultTimeS", "result_time_s"],
+  ] as const) {
+    if (!(field in body)) continue;
+    const t = body[field];
+    if (t !== null && (typeof t !== "number" || !Number.isInteger(t) || t <= 0)) {
+      return { error: `${field} must be a positive number of seconds or null.` };
+    }
+    values[column] = t as number | null;
   }
 
   if (Object.keys(values).length === 0) return { error: "No editable fields provided." };

@@ -24,6 +24,8 @@ export type SessionVariant =
   | "hills"
   | "continuous"
   | "progression"
+  /** Long run with marathon-pace blocks (racePlan.ts specific phase). */
+  | "mp_blocks"
   | "plain";
 
 export type EffortZoneId = "echauffement" | "facile" | "aerobie" | "seuil" | "maximum";
@@ -48,6 +50,15 @@ export interface AthleteCalibration {
   paceReferenceSecPerKm: number;
   /** Facile/Longue target pace in seconds/km — fitted from the athlete's runs, or paceRef × 1.29. */
   easyPaceSecPerKm: number;
+  /**
+   * Paces predicted from the latest race result (paces.ts, Riegel heuristics) — set only
+   * when a result exists. Threshold and VO2max sessions read them over paceRef when present.
+   */
+  marathonPaceSecPerKm?: number;
+  thresholdPaceSecPerKm?: number;
+  vo2maxPaceSecPerKm?: number;
+  /** Half-marathon pace, for race-pace tempo sessions in a half-marathon block. */
+  halfPaceSecPerKm?: number;
 }
 
 /** One row of a session's structure (warm-up, body, cooldown, ...). */
@@ -136,6 +147,43 @@ export interface RaceModeInput {
   distanceKm: number;
   /** Peak-week long run, already capped (race.ts peakLongRunMinutes). Only read when position is "peak". */
   peakLongRunMinutes: number;
+  /** A solo test (bib_status 'solo_test') standing in for a race: same week shape, different wording. */
+  soloTest?: boolean;
+  /** Long run kept in the race week, in minutes — set when the race is under a half and leaves room 4+ days before it. */
+  raceWeekLongRunMinutes?: number;
+  /** Pace (sec/km) of the short reminders in the race week's first easy run (marathon / half pace); absent = none. */
+  reminderPaceSecPerKm?: number;
+}
+
+/**
+ * One week of the backward race plan (racePlan.ts), as the week generator
+ * consumes it: the planned volume and long run replace the progression
+ * engine's, the key session picks the quality role.
+ */
+export interface RacePlanWeekInput {
+  phase: "recovery" | "base" | "development" | "specific" | "taper" | "race";
+  targetKm: number;
+  longRunMin: number;
+  keySession:
+    | "none"
+    | "threshold"
+    | "vo2max"
+    | "mp_tempo"
+    | "race_pace"
+    | "mp_reminder"
+    | "race"
+    | "time_trial"
+    | "long_tempo";
+  isDeload: boolean;
+  /** MP blocks inside the long run (marathon specific phase). */
+  longRunMpBlock: { reps: number; kmEach: number } | null;
+  /** First day (0 = Monday) quality may land on; the days before are easy after a race. */
+  qualityFromDay: number;
+  /** Last day (0 = Monday) quality may land on — before the 3-day pre-race window of a race early next week. */
+  qualityUntilDay?: number;
+  /** Last day (0 = Monday) the long run may land on — before the 4-day pre-race window. */
+  longRunUntilDay?: number;
+  qualityLevel: number;
 }
 
 /** A subjective_entries row, trimmed to what the downgrade rules need. */
@@ -189,4 +237,6 @@ export interface PlannerInput {
   previousWeekLongRunOnSunday?: boolean;
   /** Set for the weeks around a race (race.ts raceModeForWeek); null/absent = a normal week. */
   raceMode?: RaceModeInput | null;
+  /** The goal race's plan for this week (racePlan.ts); absent = the continuous mode. */
+  racePlan?: RacePlanWeekInput | null;
 }

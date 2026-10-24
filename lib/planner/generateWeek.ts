@@ -13,6 +13,10 @@ import {
   computeLongRunAnchorMinutes,
   longestRunMinutes,
   raceModeForWeek,
+  resolveRacePlanWeek,
+  goalRecoveryMode,
+  trainingPhaseOf,
+  RACE_PAIN_WARNING_MIN_SCORE,
   blockStartAfterRaces,
   evaluateBlockBoundary,
   isBlockBoundary,
@@ -118,6 +122,10 @@ export interface ActualActivity {
   avgHeartRate: number | null;
 }
 
+function todayIsoDate(): string {
+  return isoDate(new Date());
+}
+
 export async function regenerateWeekSessions(
   params: RegenerateWeekParams
 ): Promise<RegenerateWeekResult | RegenerateWeekError> {
@@ -142,7 +150,7 @@ export async function regenerateWeekSessions(
   activityCutoff.setUTCDate(activityCutoff.getUTCDate() - 84);
   const { data: activities, error: activitiesError } = await db
     .from("garmin_activities")
-    .select("start_time, duration_seconds, activity_type")
+    .select("start_time, duration_seconds, distance_meters, activity_type")
     .eq("user_id", userId)
     .gte("start_time", activityCutoff.toISOString());
   if (activitiesError) return { error: activitiesError.message, status: 500 };
@@ -198,12 +206,48 @@ export async function regenerateWeekSessions(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err), status: 500 };
   }
-  const raceMode = raceModeForWeek(races, weekStart, longestRunMinutes(activitySamples), state.longRunMinutes);
-  if (!raceMode) state = { ...state, blockStartDate: blockStartAfterRaces(races, weekStart, state.blockStartDate) };
+  // Backward race planner: with a goal race ahead it supplies the week's volume, long run and key
+  // session, and the progression engine stays out (no block evaluation, no write). Without one the
+  // continuous mode — and the legacy race mode around a lone race — runs unchanged.
+  const today = parseIsoDate(todayIsoDate());
+  const { data: flagRows, error: flagError } = await db
+    .from("subjective_entries")
+    .select("entry_date")
+    .eq("user_id", userId)
+    .gte("pain_score", RACE_PAIN_WARNING_MIN_SCORE)
+    .gte("entry_date", isoDate(addDays(today, -42)));
+  if (flagError) return { error: flagError.message, status: 500 };
+  const { calibration: baseCalibration } = await loadAthleteCalibration(db, userId);
+  const resolvedPlan = resolveRacePlanWeek({
+    races,
+    weekStart,
+    today,
+    activities: (activities ?? []).map((a) => ({
+      startTime: new Date(a.start_time),
+      distanceKm: (a.distance_meters ?? 0) / 1000,
+      durationMinutes: (a.duration_seconds ?? 0) / 60,
+      activityType: a.activity_type,
+    })),
+    flaggedDates: (flagRows ?? []).map((r) => parseIsoDate(r.entry_date)),
+    easyPaceSecPerKm: baseCalibration.easyPaceSecPerKm,
+  });
+  const racePlan = resolvedPlan?.input ?? null;
+  const raceMode = resolvedPlan
+    ? resolvedPlan.raceMode
+    : (raceModeForWeek(races, weekStart, longestRunMinutes(activitySamples), state.longRunMinutes) ??
+      goalRecoveryMode(races, weekStart));
+  if (resolvedPlan) {
+    state = {
+      ...state,
+      phase: trainingPhaseOf(resolvedPlan.week),
+      qualityLevel: resolvedPlan.input.qualityLevel,
+    };
+  }
+  if (!raceMode && !resolvedPlan) state = { ...state, blockStartDate: blockStartAfterRaces(races, weekStart, state.blockStartDate) };
 
   // If this week crosses a block boundary, evaluate the completed block's consistency
   // and apply the fixed-priority progression (frequency → quality volume → long-run re-anchor).
-  if (!raceMode && isBlockBoundary(state, weekStart)) {
+  if (!raceMode && !resolvedPlan && isBlockBoundary(state, weekStart)) {
     const { data: blockSessions } = await db
       .from("planned_sessions")
       .select("completed, session_type")
@@ -219,7 +263,7 @@ export async function regenerateWeekSessions(
     state = evaluateBlockBoundary({ state, consistencyScorePct, weekStart, longRunAnchorMinutes });
   }
 
-  if (!raceMode) {
+  if (!raceMode && !resolvedPlan) {
     const { error: stateError } = await db.from("progression_state").upsert({
       user_id: userId,
       cycle_start_date: isoDate(state.cycleStartDate),
@@ -252,13 +296,22 @@ export async function regenerateWeekSessions(
   }));
 
   const cycleWeekNumber = fullWeeksBetween(state.cycleStartDate, weekStart) + 1;
-  const { calibration } = await loadAthleteCalibration(db, userId);
+  // Race-based paces (Riegel heuristics from the latest result) join the fitted easy pace and HR zones.
+  const calibration = resolvedPlan?.paces
+    ? {
+        ...baseCalibration,
+        marathonPaceSecPerKm: resolvedPlan.paces.marathonPaceSecPerKm,
+        thresholdPaceSecPerKm: resolvedPlan.paces.thresholdPaceSecPerKm,
+        vo2maxPaceSecPerKm: resolvedPlan.paces.vo2maxPaceSecPerKm,
+        halfPaceSecPerKm: resolvedPlan.paces.halfPaceSecPerKm,
+      }
+    : baseCalibration;
 
   // Regeneration never touches a completed or skipped session, nor an
   // unresolved one dated before today: those are kept as-is and only the rest
   // of the week (unresolved sessions from today on) is replaced. The planner
   // plans just the slots and days they leave free.
-  const todayIso = isoDate(new Date());
+  const todayIso = todayIsoDate();
   const { data: existingSessionRows, error: existingError } = await db
     .from("planned_sessions")
     .select("id, slot_index, manual_day_override, planned_date, completed, skipped, session_type, downgraded_from, modality, indoor")
@@ -339,6 +392,7 @@ export async function regenerateWeekSessions(
     firstPlannableDay,
     previousWeekLongRunOnSunday: (previousSundayLong ?? []).length > 0,
     raceMode,
+    racePlan,
   });
 
   // Replace only the replaceable sessions.

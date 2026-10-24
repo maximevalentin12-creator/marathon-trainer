@@ -669,3 +669,37 @@ CREATE POLICY "own races" ON races
 ALTER TABLE planned_sessions DROP CONSTRAINT IF EXISTS planned_sessions_session_type_check;
 ALTER TABLE planned_sessions ADD CONSTRAINT planned_sessions_session_type_check
   CHECK (session_type IN ('easy', 'long', 'threshold', 'vo2max', 'rest', 'race'));
+
+-- ─── Migration for an already-provisioned database (backward race planner) ───
+-- Idempotent — safe to re-run. races gains the goal/tune-up hierarchy, bib
+-- status, an optional target and a recorded result (the latest result feeds the
+-- Riegel predictions in lib/planner/paces.ts). weekly_setups moves to 3-5 runs
+-- a week; NOT VALID keeps rows saved under the old 0-4 range readable while
+-- every new or updated row must satisfy the new range.
+
+ALTER TABLE races
+  ADD COLUMN IF NOT EXISTS kind           TEXT NOT NULL DEFAULT 'goal',
+  ADD COLUMN IF NOT EXISTS parent_race_id UUID REFERENCES races(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS bib_status     TEXT NOT NULL DEFAULT 'confirmed',
+  ADD COLUMN IF NOT EXISTS target_time_s  INTEGER CHECK (target_time_s > 0),
+  ADD COLUMN IF NOT EXISTS result_time_s  INTEGER CHECK (result_time_s > 0);
+
+ALTER TABLE races DROP CONSTRAINT IF EXISTS races_kind_check;
+ALTER TABLE races ADD CONSTRAINT races_kind_check CHECK (kind IN ('goal', 'tune_up'));
+ALTER TABLE races DROP CONSTRAINT IF EXISTS races_bib_status_check;
+ALTER TABLE races ADD CONSTRAINT races_bib_status_check CHECK (bib_status IN ('confirmed', 'pending', 'solo_test'));
+
+CREATE INDEX IF NOT EXISTS races_parent_idx ON races(parent_race_id);
+
+-- 42.195 km must not round to 42.20.
+ALTER TABLE races ALTER COLUMN distance_km TYPE NUMERIC(6, 3);
+
+ALTER TABLE weekly_setups ALTER COLUMN runs_per_week SET DEFAULT 4;
+ALTER TABLE weekly_setups DROP CONSTRAINT IF EXISTS weekly_setups_runs_per_week_check;
+ALTER TABLE weekly_setups ADD CONSTRAINT weekly_setups_runs_per_week_check
+  CHECK (runs_per_week BETWEEN 3 AND 5) NOT VALID;
+
+-- The week's total (running + non-impact) now goes up to 7, one session a day.
+ALTER TABLE weekly_setups DROP CONSTRAINT IF EXISTS weekly_setups_total_sessions_check;
+ALTER TABLE weekly_setups ADD CONSTRAINT weekly_setups_total_sessions_check
+  CHECK (runs_per_week + non_impact_sessions BETWEEN 1 AND 7);

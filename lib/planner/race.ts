@@ -16,6 +16,13 @@ export interface Race {
   name: string;
   raceDate: Date;
   distanceKm: number;
+  /** Backward-planner fields (races migration); a race loaded without them is a goal race. */
+  kind?: "goal" | "tune_up";
+  parentRaceId?: string | null;
+  bibStatus?: "confirmed" | "pending" | "solo_test";
+  targetTimeSeconds?: number | null;
+  /** Recorded finish time — the latest one feeds the Riegel predictions (paces.ts). */
+  resultTimeSeconds?: number | null;
 }
 
 /** Longest distance race mode handles — the half marathon. */

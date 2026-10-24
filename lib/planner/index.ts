@@ -43,6 +43,7 @@ export type { DayCode } from "./days";
 export type {
   PlannerInput,
   RaceModeInput,
+  RacePlanWeekInput,
   RaceWeekPosition,
   AthleteCalibration,
   PlannedSession,
@@ -58,3 +59,26 @@ export type {
   Modality,
   NonImpactMachine,
 } from "./types";
+export { buildRacePlan, planWeekFor } from "./racePlan";
+export type {
+  RacePlan,
+  RacePlanWeek,
+  RacePhase,
+  RaceKeySession,
+  PlanRace,
+  RacePlanHistory,
+  HistoryActivity,
+  MpBlock,
+} from "./racePlan";
+export {
+  predictRaceTimes,
+  riegelSeconds,
+  trainingPacesFromRace,
+  latestRaceResult,
+  RIEGEL_EXPONENT,
+  MARATHON_PACE_SAFETY_FACTOR,
+  LONG_RUN_PROOF_KM,
+} from "./paces";
+export type { RaceResult, RacePredictions, TrainingPaces } from "./paces";
+export { resolveRacePlanWeek, activeGoalRace, goalRecoveryMode, trainingPhaseOf } from "./racePlanWeek";
+export type { ResolvedRacePlanWeek, RacePlanWeekParams } from "./racePlanWeek";

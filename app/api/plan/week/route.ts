@@ -118,16 +118,16 @@ export async function POST(req: NextRequest) {
   const nonImpactSessions = nonImpactSessionsRaw ?? 0;
 
   if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
-  if (!Number.isInteger(runsPerWeek) || runsPerWeek < 0 || runsPerWeek > 4) {
-    return NextResponse.json({ error: "runsPerWeek must be an integer between 0 and 4." }, { status: 400 });
+  if (!Number.isInteger(runsPerWeek) || runsPerWeek < 0 || runsPerWeek > 5) {
+    return NextResponse.json({ error: "runsPerWeek must be an integer between 0 and 5." }, { status: 400 });
   }
   if (!Number.isInteger(nonImpactSessions) || nonImpactSessions < 0 || nonImpactSessions > 4) {
     return NextResponse.json({ error: "nonImpactSessions must be an integer between 0 and 4." }, { status: 400 });
   }
   const totalSessions = runsPerWeek + nonImpactSessions;
-  if (totalSessions < 1 || totalSessions > 4) {
+  if (totalSessions < 1 || totalSessions > 7) {
     return NextResponse.json(
-      { error: "runsPerWeek + nonImpactSessions (the week's total) must be between 1 and 4." },
+      { error: "runsPerWeek + nonImpactSessions (the week's total) must be between 1 and 7." },
       { status: 400 }
     );
   }

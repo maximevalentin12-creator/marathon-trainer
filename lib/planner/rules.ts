@@ -11,6 +11,7 @@ import type {
   PlannedSession,
   PlannerInput,
   RaceModeInput,
+  RacePlanWeekInput,
   SessionKind,
   SessionStep,
   SessionVariant,
@@ -59,6 +60,15 @@ const WHY_VO2MAX =
   "Habituer le cœur et les poumons à un effort très intense, par courtes doses — la séance la plus coûteuse de la semaine, donc volontairement courte.";
 const WHY_THRESHOLD_RACE =
   "Garder du rythme avant la course sans accumuler de fatigue — séance courte et contrôlée, jamais à fond.";
+
+const WHY_SOLO_TEST =
+  "Une mesure de forme, pas une course : elle réactualise tes allures pour la suite. Pars prudemment, tiens une allure régulière.";
+const WHY_LONG_MP =
+  "Habituer le corps à tenir l'allure marathon sur des jambes déjà fatiguées, sans dépasser ce que tu as déjà couru.";
+const WHY_TEMPO =
+  "Du temps passé à l'allure visée, en continu : c'est ce qui rend l'allure de course familière le jour J.";
+const WHY_REMINDER =
+  "Quelques rappels courts pour garder le rythme en mémoire sans fatigue : l'affûtage ne se gâche pas avec une séance dure.";
 
 /** The race's own note. The 15th-km cue only fits a long race; shorter ones hold until the last 3 km. */
 function whyRace(distanceKm: number): string {
@@ -241,12 +251,16 @@ function buildThresholdBody(
 ): { steps: SessionStep[]; totalMinutes: number; distanceKm: number } {
   const paceRef = cal.paceReferenceSecPerKm;
   const { reps, workMin, recoveryMin } = structure;
-  const paceHint = `≈${fmtPace(paceRef + 3)}–${fmtPace(paceRef + 13)}/km`;
+  // A race-based threshold pace (paces.ts, heuristic) wins over the 10K-reference offsets.
+  const racePace = cal.thresholdPaceSecPerKm;
+  const paceHint = racePace
+    ? `≈${fmtPace(racePace - 5)}–${fmtPace(racePace + 5)}/km`
+    : `≈${fmtPace(paceRef + 3)}–${fmtPace(paceRef + 13)}/km`;
   const warm = THRESHOLD_WARMUP_MINUTES;
   const cool = THRESHOLD_COOLDOWN_MINUTES;
   const easyPace = cal.easyPaceSecPerKm;
   // Midpoint of the displayed range above — same value already used as targetPaceSecondsPerKm.
-  const thresholdPace = paceRef + 8;
+  const thresholdPace = racePace ?? paceRef + 8;
 
   let corps: SessionStep;
   let corpsMin: number;
@@ -316,6 +330,7 @@ function buildVo2maxBody(
           description: `${reps} × ${workMin} min effort « très dur », récup ${recoveryMin} min zone Facile`,
           zoneLabel: "Maximum (sensation)",
           heartRateHint: "FC en fin de rép seulement : haut Seuil / début Maximum",
+          ...(cal.vo2maxPaceSecPerKm ? { paceHint: `≈${fmtPace(cal.vo2maxPaceSecPerKm)}/km (allure 5 km)` } : {}),
         };
 
   // Hills (treadmill incline or real hill) cover less ground for the same effort than flat
@@ -324,7 +339,7 @@ function buildVo2maxBody(
     variant === "hills"
       ? null
       : stepKm(warm, cal.easyPaceSecPerKm) +
-        stepKm(reps * workMin, cal.paceReferenceSecPerKm + VO2MAX_PACE_ADJUSTMENT_SEC_PER_KM) +
+        stepKm(reps * workMin, cal.vo2maxPaceSecPerKm ?? cal.paceReferenceSecPerKm + VO2MAX_PACE_ADJUSTMENT_SEC_PER_KM) +
         stepKm((reps - 1) * recoveryMin, cal.easyPaceSecPerKm) +
         stepKm(cool, cal.easyPaceSecPerKm);
 
@@ -482,7 +497,7 @@ function buildThresholdSession(
     machine: null,
     targetDurationMinutes: totalMinutes,
     targetDistanceKm: Math.round(distanceKm * 10) / 10,
-    targetPaceSecondsPerKm: cal.paceReferenceSecPerKm + 8,
+    targetPaceSecondsPerKm: cal.thresholdPaceSecPerKm ?? cal.paceReferenceSecPerKm + 8,
     zoneSummary: "Facile → Seuil → Facile",
     steps,
     whyNote: raceShort ? WHY_THRESHOLD_RACE : WHY_THRESHOLD,
@@ -539,7 +554,7 @@ function buildRaceSession(
     userId,
     plannedDate,
     kind: "race",
-    label: `Course : ${race.raceName}`,
+    label: race.soloTest ? `Test solo : ${race.raceName}` : `Course : ${race.raceName}`,
     variant: "plain",
     modality: "running",
     indoor: false,
@@ -553,16 +568,168 @@ function buildRaceSession(
       {
         label: "Course",
         durationMinutes: null,
-        description: `${km} km — départ en zone Facile, accélération seulement en fin de course si tout va bien`,
+        description: race.soloTest
+          ? `${km} km en solo, allure régulière et contrôlée — départ prudent, tu peux accélérer sur la fin si ça va`
+          : `${km} km — départ en zone Facile, accélération seulement en fin de course si tout va bien`,
         zoneLabel: "Facile",
         heartRateHint: hrHint(cal.zones, "facile"),
       },
     ],
-    whyNote: whyRace(race.distanceKm),
+    whyNote: race.soloTest ? WHY_SOLO_TEST : whyRace(race.distanceKm),
     zoneReference: [cal.zones.facile],
     stridesAdded: false,
     downgradedFrom: null,
     downgradeReason: null,
+  };
+}
+
+// ─── Race-plan sessions (backward race planner, racePlan.ts) ───────────────
+
+/** Long run with marathon-pace blocks: easy warm-up, `reps` × `kmEach` km at MP with 1 km easy between, easy cool-down. */
+function buildMpLongSession(
+  userId: string,
+  plannedDate: Date,
+  minutes: number,
+  block: { reps: number; kmEach: number },
+  indoor: boolean,
+  cal: AthleteCalibration,
+  mpPace: number
+): PlannedSession {
+  const easyPace = cal.easyPaceSecPerKm;
+  const recoveryKm = 1;
+  const cooldownMin = 10;
+  // The MP work never takes more than 60 % of the run: shrink the blocks if the run is short.
+  let kmEach = block.kmEach;
+  const workMinutes = (km: number) => (km * block.reps * mpPace) / 60 + ((block.reps - 1) * recoveryKm * easyPace) / 60;
+  while (kmEach > 2 && workMinutes(kmEach) > minutes * 0.6) kmEach--;
+  const warmupMin = Math.max(15, Math.round(minutes - workMinutes(kmEach) - cooldownMin));
+
+  const steps: SessionStep[] = [{ ...warmupStep(warmupMin, indoor, cal.zones), label: "Échauffement facile" }];
+  for (let r = 1; r <= block.reps; r++) {
+    steps.push({
+      label: `Bloc ${r}/${block.reps} — allure marathon`,
+      durationMinutes: Math.round((kmEach * mpPace) / 60),
+      description: `${kmEach} km à allure marathon, régulier et relâché`,
+      zoneLabel: "Allure marathon",
+      heartRateHint: hrHint(cal.zones, "aerobie"),
+      paceHint: `≈${fmtPace(mpPace)}/km`,
+    });
+    if (r < block.reps) {
+      steps.push({
+        label: "Récupération",
+        durationMinutes: Math.round((recoveryKm * easyPace) / 60),
+        description: `${recoveryKm} km facile`,
+        zoneLabel: "Facile",
+        heartRateHint: hrHint(cal.zones, "facile"),
+      });
+    }
+  }
+  steps.push(cooldownStep(cooldownMin, indoor, cal.zones));
+
+  const mpKm = kmEach * block.reps;
+  const km = mpKm + stepKm(minutes - (mpKm * mpPace) / 60, easyPace);
+  return {
+    userId,
+    plannedDate,
+    kind: "long",
+    label: `Longue avec ${block.reps} × ${kmEach} km allure marathon`,
+    variant: "mp_blocks",
+    modality: "running",
+    indoor,
+    inclinePercent: indoor ? 1 : null,
+    machine: null,
+    targetDurationMinutes: minutes,
+    targetDistanceKm: Math.round(km * 10) / 10,
+    targetPaceSecondsPerKm: easyPace,
+    zoneSummary: "Facile → Allure marathon → Facile",
+    steps,
+    whyNote: WHY_LONG_MP,
+    zoneReference: [cal.zones.facile, cal.zones.aerobie],
+    stridesAdded: false,
+    downgradedFrom: null,
+    downgradeReason: null,
+  };
+}
+
+/** Continuous tempo at marathon or half-marathon pace — a threshold-slot session, paced by the race rather than by HR. */
+function buildPaceTempoSession(
+  userId: string,
+  plannedDate: Date,
+  tempoKm: number,
+  pace: number,
+  paceName: string,
+  indoor: boolean,
+  cal: AthleteCalibration
+): PlannedSession {
+  const warm = 10;
+  const cool = 10;
+  const tempoMin = Math.round((tempoKm * pace) / 60);
+  const km = stepKm(warm + cool, cal.easyPaceSecPerKm) + tempoKm;
+  return {
+    userId,
+    plannedDate,
+    kind: "threshold",
+    label: `Qualité : Tempo allure ${paceName}`,
+    variant: "continuous",
+    modality: "running",
+    indoor,
+    inclinePercent: indoor ? 1 : null,
+    machine: null,
+    targetDurationMinutes: warm + tempoMin + cool,
+    targetDistanceKm: Math.round(km * 10) / 10,
+    targetPaceSecondsPerKm: pace,
+    zoneSummary: `Facile → Allure ${paceName} → Facile`,
+    steps: [
+      warmupStep(warm, indoor, cal.zones),
+      {
+        label: "Corps de séance",
+        durationMinutes: tempoMin,
+        description: `${tempoKm} km en continu à allure ${paceName}`,
+        zoneLabel: `Allure ${paceName}`,
+        heartRateHint: hrHint(cal.zones, "aerobie"),
+        paceHint: `≈${fmtPace(pace)}/km`,
+      },
+      cooldownStep(cool, indoor, cal.zones),
+    ],
+    whyNote: WHY_TEMPO,
+    zoneReference: [cal.zones.facile, cal.zones.aerobie],
+    stridesAdded: false,
+    downgradedFrom: null,
+    downgradeReason: null,
+  };
+}
+
+/** Appends short race-pace reminders (and strides when asked) to an easy session; it stays an easy one. */
+function withPaceReminder(
+  session: PlannedSession,
+  reps: number,
+  kmEach: number,
+  pace: number | undefined,
+  cal: AthleteCalibration,
+  strides: boolean
+): PlannedSession {
+  const recoveryMin = 2;
+  const reminderMin = pace ? Math.round(reps * ((kmEach * pace) / 60) + (reps - 1) * recoveryMin) : reps * 5;
+  const steps: SessionStep[] = [
+    ...session.steps,
+    {
+      label: "Rappels d'allure",
+      durationMinutes: reminderMin,
+      description: `${reps} × ${kmEach} km à l'allure de course, récup ${recoveryMin} min de trot — court et facile`,
+      zoneLabel: "Allure de course",
+      heartRateHint: hrHint(cal.zones, "aerobie"),
+      ...(pace ? { paceHint: `≈${fmtPace(pace)}/km` } : {}),
+    },
+  ];
+  if (strides) steps.push(stridesStep(4));
+  return {
+    ...session,
+    label: "Facile avec rappels d'allure",
+    steps,
+    targetDurationMinutes: session.targetDurationMinutes + reminderMin,
+    zoneSummary: "Facile → Allure de course",
+    whyNote: WHY_REMINDER,
+    zoneReference: [cal.zones.facile, cal.zones.aerobie],
   };
 }
 
@@ -583,6 +750,8 @@ const RACE_WEEK_STRIDES_EASY_MINUTES = 20;
 const RACE_WEEK_STRIDE_REPS = 4;
 const RACE_WEEK_NON_IMPACT_MINUTES = 30;
 const RACE_WEEK_REST_DAYS_BEFORE = 2;
+/** A kept long run stays at least this many days before the race. */
+const RACE_WEEK_LONG_RUN_DAYS_BEFORE = 4;
 
 /**
  * The normal week's roles, reshaped for race mode — the slots (so the weekly
@@ -649,7 +818,7 @@ function raceModeEasyMinutesBySlot(
 }
 
 /** Race week roles: the 30-min easy run, the easy run with strides, the race. */
-type RaceWeekRole = "easy" | "strides" | "race";
+type RaceWeekRole = "easy" | "strides" | "race" | "long";
 
 interface RaceWeekSlot {
   modality: Modality;
@@ -662,10 +831,11 @@ interface RaceWeekSlot {
  * closest to the race. A fourth run is dropped (nothing more before a race).
  * The race is always there, even with no running slot in the setup.
  */
-function raceWeekArchitecture(runsPerWeek: number, nonImpactSessions: number): RaceWeekSlot[] {
-  const easyRunCount = Math.min(2, Math.max(0, runsPerWeek - 1));
+function raceWeekArchitecture(runsPerWeek: number, nonImpactSessions: number, withLong = false): RaceWeekSlot[] {
+  const easyRunCount = Math.min(2, Math.max(0, runsPerWeek - 1 - (withLong ? 1 : 0)));
   const easyRuns = (["easy", "strides"] as const).slice(2 - easyRunCount);
   return [
+    ...(withLong ? [{ modality: "running" as const, role: "long" as const }] : []),
     ...easyRuns.map((role) => ({ modality: "running" as const, role })),
     ...Array.from({ length: nonImpactSessions }, () => ({ modality: "non_impact" as const, role: "easy" as const })),
     { modality: "running", role: "race" },
@@ -696,7 +866,9 @@ function pickSpreadDays(pool: number[], n: number): number[] {
 function buildRaceWeekPlan(input: PlannerInput, raceMode: RaceModeInput): WeekPlan {
   const { userId, weekStartDate, calibration, subjectiveEntries, nonImpactMachines, slotOverrides } = input;
   const keptSessions = input.keptSessions ?? [];
-  const architecture = raceWeekArchitecture(input.runsPerWeek, input.nonImpactSessions);
+  // A race under a half marathon keeps the week's long run when a day at least 4 days before the race is free.
+  const withLong = (raceMode.raceWeekLongRunMinutes ?? 0) > 0 && input.runsPerWeek >= 3;
+  const architecture = raceWeekArchitecture(input.runsPerWeek, input.nonImpactSessions, withLong);
   const raceIndex = architecture.length - 1;
   const raceOffset = Math.round((raceMode.raceDate.getTime() - weekStartDate.getTime()) / 86_400_000);
   const firstPlannableDay = Math.max(0, Math.min(7, input.firstPlannableDay ?? 0));
@@ -710,7 +882,12 @@ function buildRaceWeekPlan(input: PlannerInput, raceMode: RaceModeInput): WeekPl
         ? raceIndex
         : Array.from(open)
             .sort((a, b) => a - b)
-            .find((i) => architecture[i].modality === k.modality && architecture[i].role !== "race");
+            .find(
+              (i) =>
+                architecture[i].modality === k.modality &&
+                architecture[i].role !== "race" &&
+                (k.kind === "long") === (architecture[i].role === "long")
+            );
     if (idx !== undefined) open.delete(idx);
   }
   const openList = Array.from(open).sort((a, b) => a - b);
@@ -720,27 +897,40 @@ function buildRaceWeekPlan(input: PlannerInput, raceMode: RaceModeInput): WeekPl
     .sort((a, b) => a - b);
   const afterLong = new Set<number>(input.previousWeekLongRunOnSunday ? [0] : []);
 
-  const runSlots = openList.filter((i) => architecture[i].modality === "running" && architecture[i].role !== "race");
+  // The long run, if kept: the earliest free day at least 4 days before the race; no slot, no long run.
+  const longSlot = openList.find((i) => architecture[i].role === "long");
+  const longDay =
+    longSlot === undefined ? undefined : candidates.find((d) => d <= raceOffset - RACE_WEEK_LONG_RUN_DAYS_BEFORE);
+  if (longDay !== undefined) afterLong.add(longDay + 1);
+  const freeCandidates = candidates.filter((d) => d !== longDay);
+
+  const runSlots = openList.filter(
+    (i) => architecture[i].modality === "running" && architecture[i].role !== "race" && architecture[i].role !== "long"
+  );
   const runDays = pickSpreadDays(
-    candidates.filter((d) => !afterLong.has(d)),
+    freeCandidates.filter((d) => !afterLong.has(d)),
     runSlots.length
   );
   const placedRuns = runSlots.slice(runSlots.length - runDays.length);
   const nonImpactSlots = openList.filter((i) => architecture[i].modality === "non_impact");
-  const nonImpactDays = candidates
+  const nonImpactDays = freeCandidates
     .filter((d) => !runDays.includes(d))
     .sort((a, b) => Number(afterLong.has(b)) - Number(afterLong.has(a)) || a - b)
     .slice(0, nonImpactSlots.length);
   const placedNonImpact = nonImpactSlots.slice(0, nonImpactDays.length);
 
   // Manual day overrides can move the sessions before the race, within the same allowed days.
-  const beforeRace = [...placedRuns, ...placedNonImpact];
+  const beforeRace = [...(longDay !== undefined ? [longSlot!] : []), ...placedRuns, ...placedNonImpact];
   const overridesByPos: Record<number, number> = {};
   beforeRace.forEach((slotIndex, pos) => {
     const day = slotOverrides?.[slotIndex];
     if (day !== undefined) overridesByPos[pos] = day;
   });
-  const days = applyDayOverrides([...runDays, ...nonImpactDays], overridesByPos, candidates);
+  const days = applyDayOverrides(
+    [...(longDay !== undefined ? [longDay] : []), ...runDays, ...nonImpactDays],
+    overridesByPos,
+    candidates
+  );
 
   const keptIndoorRuns = keptSessions.filter((k) => k.modality === "running" && k.indoor).length;
   let indoorLeft = Math.max(0, Math.min(input.indoorRuns, input.runsPerWeek) - keptIndoorRuns);
@@ -750,10 +940,29 @@ function buildRaceWeekPlan(input: PlannerInput, raceMode: RaceModeInput): WeekPl
   beforeRace.forEach((slotIndex, pos) => {
     const slot = architecture[slotIndex];
     const plannedDate = addDays(weekStartDate, days[pos]);
-    const decision = decideDowngrade("easy", findApplicableSignal(subjectiveEntries, plannedDate));
+    const decision = decideDowngrade(
+      slot.role === "long" ? "long" : "easy",
+      findApplicableSignal(subjectiveEntries, plannedDate)
+    );
     slotIndices.push(slotIndex);
     if (decision.type === "rest") {
       sessions.push(buildRestSession(userId, plannedDate, "easy", decision.reason));
+    } else if (slot.role === "long") {
+      const minutes = raceMode.raceWeekLongRunMinutes!;
+      sessions.push(
+        decision.type === "toEasy"
+          ? buildEasySession(userId, plannedDate, round5(minutes * 0.55), false, calibration, false, "long", decision.reason)
+          : buildLongSession(
+              userId,
+              plannedDate,
+              decision.type === "shortenLong" ? Math.max(20, round5(minutes * decision.factor)) : minutes,
+              "continuous",
+              false,
+              calibration,
+              null,
+              null
+            )
+      );
     } else if (slot.modality === "non_impact") {
       sessions.push(
         buildNonImpactEasySession(
@@ -770,18 +979,22 @@ function buildRaceWeekPlan(input: PlannerInput, raceMode: RaceModeInput): WeekPl
       const indoor = indoorLeft > 0;
       if (indoor) indoorLeft--;
       const strides = slot.role === "strides";
+      const easy = buildEasySession(
+        userId,
+        plannedDate,
+        strides ? RACE_WEEK_STRIDES_EASY_MINUTES : RACE_WEEK_FIRST_EASY_MINUTES,
+        indoor,
+        calibration,
+        false,
+        null,
+        null,
+        strides ? RACE_WEEK_STRIDE_REPS : null
+      );
+      // The first easy run carries two short race-pace reminders when the plan knows the pace.
       sessions.push(
-        buildEasySession(
-          userId,
-          plannedDate,
-          strides ? RACE_WEEK_STRIDES_EASY_MINUTES : RACE_WEEK_FIRST_EASY_MINUTES,
-          indoor,
-          calibration,
-          false,
-          null,
-          null,
-          strides ? RACE_WEEK_STRIDE_REPS : null
-        )
+        !strides && raceMode.reminderPaceSecPerKm
+          ? withPaceReminder(easy, 2, 1, raceMode.reminderPaceSecPerKm, calibration, false)
+          : easy
       );
     }
   });
@@ -820,7 +1033,10 @@ function runningArchitecture(runsPerWeek: number, isDecharge: boolean): Role[] {
   if (runsPerWeek === 1) return ["long"];
   if (runsPerWeek === 2) return isDecharge ? ["easy", "long"] : ["quality", "long"];
   if (runsPerWeek === 3) return isDecharge ? ["easy", "easy", "long"] : ["easy", "quality", "long"];
-  return isDecharge ? ["easy", "easy", "easy", "long"] : ["easy", "quality", "easy", "long"];
+  if (runsPerWeek === 4) return isDecharge ? ["easy", "easy", "easy", "long"] : ["easy", "quality", "easy", "long"];
+  return isDecharge
+    ? ["easy", "easy", "easy", "easy", "long"]
+    : ["easy", "quality", "easy", "easy", "long"];
 }
 
 /**
@@ -1200,6 +1416,69 @@ export function applyLiveDowngrade(params: {
   );
 }
 
+/** Rough km of one quality session (warm-up and cool-down included), growing with its level — only used to size the easy runs from a km target. */
+const PLAN_QUALITY_KM_BASE = 8;
+const PLAN_EASY_MIN_MINUTES = 25;
+const PLAN_EASY_MAX_MINUTES = 80;
+
+const PLAN_QUALITY_KEYS: ReadonlyArray<RacePlanWeekInput["keySession"]> = ["threshold", "vo2max", "mp_tempo", "race_pace"];
+
+/**
+ * Race-plan weeks: keeps the quality slots only when the plan wants a quality
+ * session, and the long slot only when it has a long run. A mp_reminder week
+ * returns the index of the (running) slot that carries the reminders.
+ */
+function planArchitecture(
+  base: ArchSlot[],
+  plan: RacePlanWeekInput
+): { slots: ArchSlot[]; reminderSlot: number } {
+  const wantsQuality = PLAN_QUALITY_KEYS.includes(plan.keySession);
+  let reminderSlot = -1;
+  const slots = base.map((s, i) => {
+    if (s.role === "quality" && !wantsQuality) {
+      if (plan.keySession === "mp_reminder" && s.modality === "running" && reminderSlot === -1) reminderSlot = i;
+      return { ...s, role: "easy" as const };
+    }
+    if (s.role === "long" && plan.longRunMin <= 0) return { ...s, role: "easy" as const };
+    return s;
+  });
+  return { slots, reminderSlot };
+}
+
+/** Minutes of each easy slot so the week lands near plan.targetKm once the long run and quality are counted. */
+function planEasyMinutes(slots: ArchSlot[], plan: RacePlanWeekInput, easyPace: number): number {
+  const runningEasy = slots.filter((s) => s.modality === "running" && s.role === "easy").length;
+  const runningQuality = slots.filter((s) => s.modality === "running" && s.role === "quality").length;
+  const longKm = slots.some((s) => s.role === "long") ? stepKm(plan.longRunMin, easyPace) : 0;
+  const easyKm = Math.max(0, plan.targetKm - longKm - runningQuality * (PLAN_QUALITY_KM_BASE + plan.qualityLevel));
+  const minutes = runningEasy > 0 ? ((easyKm / runningEasy) * easyPace) / 60 : PLAN_EASY_MIN_MINUTES;
+  return Math.max(PLAN_EASY_MIN_MINUTES, Math.min(PLAN_EASY_MAX_MINUTES, round5(minutes)));
+}
+
+/**
+ * Keeps quality inside [qualityFromDay, qualityUntilDay] and the long run on or before
+ * longRunUntilDay (the post-race easy days and the pre-race windows): a misplaced session
+ * swaps days with an easy session that fits, and failing that becomes an easy one.
+ * Mutates `slots` and `days`.
+ */
+function enforcePlanDayLimits(slots: ArchSlot[], days: number[], plan: RacePlanWeekInput): void {
+  const from = plan.qualityFromDay;
+  const until = plan.qualityUntilDay ?? 6;
+  const longUntil = plan.longRunUntilDay ?? 6;
+  const fix = (i: number, fits: (d: number) => boolean) => {
+    if (fits(days[i])) return;
+    const j = slots.findIndex((s, k) => k !== i && s.role === "easy" && s.modality === slots[i].modality && fits(days[k]));
+    if (j !== -1) [days[i], days[j]] = [days[j], days[i]];
+    else slots[i] = { ...slots[i], role: "easy" };
+  };
+  slots.forEach((s, i) => {
+    if (s.role === "quality") fix(i, (d) => d >= from && d <= until);
+  });
+  slots.forEach((s, i) => {
+    if (s.role === "long" && s.modality === "running") fix(i, (d) => d <= longUntil);
+  });
+}
+
 export function buildWeekPlan(input: PlannerInput): WeekPlan {
   const {
     userId,
@@ -1221,28 +1500,38 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
   // Race mode overrides durations and roles for the weeks around a race (race.ts);
   // the race week itself has its own placement.
   const raceMode = input.raceMode ?? null;
+  const racePlan = input.racePlan ?? null;
   if (raceMode?.position === "race") return buildRaceWeekPlan(input, raceMode);
   const reduction = raceMode?.position === "reduction";
   const recovery = raceMode?.position === "recovery";
 
   const indoorRuns = Math.max(0, Math.min(input.indoorRuns, runsPerWeek));
-  const isDecharge = phase === "decharge" && !reduction && !recovery;
+  // A race plan carries its own deload and taper in its km and long-run numbers.
+  const isDecharge = phase === "decharge" && !reduction && !recovery && !racePlan;
 
   // Quality-role rotation (spec §4bis): Seuil/VO2max alternate by cycle-week parity.
   // Shared across running and non-impact quality slots — same week, same theme.
   // The reduction week's one quality session is always the short threshold one.
-  const role: "threshold" | "vo2max" = reduction || cycleWeekNumber % 2 === 1 ? "threshold" : "vo2max";
+  const role: "threshold" | "vo2max" = racePlan
+    ? racePlan.keySession === "vo2max"
+      ? "vo2max"
+      : "threshold"
+    : reduction || cycleWeekNumber % 2 === 1
+      ? "threshold"
+      : "vo2max";
   const roleOccurrence = Math.floor((cycleWeekNumber - 1) / 2);
   const alternateVariant = roleOccurrence % 2 === 1 && !reduction;
   // No progression finish on a race-mode long run.
-  const longVariant: SessionVariant = !raceMode && cycleWeekNumber % 2 === 0 ? "progression" : "continuous";
+  const longVariant: SessionVariant =
+    !raceMode && !racePlan && cycleWeekNumber % 2 === 0 ? "progression" : "continuous";
 
   // Duration anchors (spec §1). Shared by non-impact facile/endurance sessions too
   // (same duration as the equivalent run).
   const baseLongMinutes = longRunMinutes;
   const baseEasyMinutes = Math.max(20, round5(baseLongMinutes * 0.55));
-  const longMinutesThisWeek =
-    raceMode?.position === "peak"
+  const longMinutesThisWeek = racePlan
+    ? racePlan.longRunMin
+    : raceMode?.position === "peak"
       ? raceMode.peakLongRunMinutes
       : reduction
         ? REDUCTION_LONG_RUN_MINUTES
@@ -1251,14 +1540,18 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
           : baseLongMinutes;
   const easyMinutesThisWeek = isDecharge ? Math.max(20, round5(baseEasyMinutes * 0.7)) : baseEasyMinutes;
 
-  const architecture = raceModeArchitecture(
-    combinedArchitecture(runsPerWeek, nonImpactSessions, isDecharge),
-    raceMode
-  );
+  const fullArchitecture = combinedArchitecture(runsPerWeek, nonImpactSessions, isDecharge);
+  const planned = racePlan ? planArchitecture(fullArchitecture, racePlan) : null;
+  const architecture = planned ? planned.slots : raceModeArchitecture(fullArchitecture, raceMode);
   // Reduction/recovery: each easy slot's share of the week's volume target.
   const raceEasyMinutes = reduction || recovery ? raceModeEasyMinutesBySlot(input, architecture, raceMode!) : null;
+  const planEasy = racePlan ? planEasyMinutes(architecture, racePlan, calibration.easyPaceSecPerKm) : 0;
   const easyMinutesFor = (slotIndex: number) =>
-    raceEasyMinutes ? (raceEasyMinutes.get(slotIndex) ?? RACE_MODE_MIN_EASY_MINUTES) : easyMinutesThisWeek;
+    racePlan
+      ? planEasy
+      : raceEasyMinutes
+        ? (raceEasyMinutes.get(slotIndex) ?? RACE_MODE_MIN_EASY_MINUTES)
+        : easyMinutesThisWeek;
   const resolvedAvailableDays =
     availableDays.length >= architecture.length ? availableDays : [0, 1, 2, 3, 4, 5, 6];
 
@@ -1268,7 +1561,8 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
   const keptDays = new Set(keptSessions.map((k) => k.dayOffset));
   const plannableDays = resolvedAvailableDays.filter((d) => d >= firstPlannableDay && !keptDays.has(d));
   const open = fitSlotsToDays(openSlots(architecture, keptSessions), plannableDays.length);
-  const slots = open.map((o) => o.slot);
+  // Copies: the day limits below may turn a slot into an easy one.
+  const slots = open.map((o) => ({ ...o.slot }));
 
   const openOverrides: Record<number, number> = {};
   open.forEach((o, pos) => {
@@ -1298,6 +1592,7 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
         ...(longPos !== -1 ? [overriddenDays[longPos]] : []),
       ];
   const dayOffsets = avoidRunAfterLongRun(slots, overriddenDays, plannableDays, longDays, fixedSlots);
+  if (racePlan) enforcePlanDayLimits(slots, dayOffsets, racePlan);
   const keptIndoorRuns = keptSessions.filter((k) => k.modality === "running" && k.indoor).length;
   const indoorFlags = assignIndoor(slots, Math.max(0, indoorRuns - keptIndoorRuns));
 
@@ -1361,6 +1656,11 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
           ? Math.max(20, round5(longMinutesThisWeek * decision.factor))
           : longMinutesThisWeek;
       const reason = decision.type === "shortenLong" ? decision.reason : null;
+      const mpPace = calibration.marathonPaceSecPerKm;
+      // Marathon-pace blocks only on an unshortened long run — a downgraded day drops them.
+      if (racePlan?.longRunMpBlock && mpPace && !reason) {
+        return buildMpLongSession(userId, plannedDate, minutes, racePlan.longRunMpBlock, indoor, calibration, mpPace);
+      }
       return buildLongSession(
         userId,
         plannedDate,
@@ -1378,16 +1678,18 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
       if (decision.type === "rest") return buildRestSession(userId, plannedDate, "easy", decision.reason);
       // No strides the week after a race: easy only.
       const addStrides = !recovery && shouldAddStrides(signal);
-      return buildEasySession(
-        userId,
-        plannedDate,
-        easyMinutes,
-        indoor,
-        calibration,
-        addStrides,
-        null,
-        null
-      );
+      const easy = buildEasySession(userId, plannedDate, easyMinutes, indoor, calibration, addStrides, null, null);
+      // Taper week: the plan's quality slot becomes an easy run with short race-pace reminders.
+      return planned && open[i].slotIndex === planned.reminderSlot
+        ? withPaceReminder(
+            easy,
+            3,
+            1,
+            calibration.marathonPaceSecPerKm ?? calibration.halfPaceSecPerKm,
+            calibration,
+            true
+          )
+        : easy;
     }
 
     // slot.role === "quality" (running)
@@ -1407,9 +1709,28 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
       );
     }
 
+    const tempoPace =
+      racePlan?.keySession === "mp_tempo"
+        ? calibration.marathonPaceSecPerKm
+        : racePlan?.keySession === "race_pace"
+          ? calibration.halfPaceSecPerKm
+          : undefined;
+    if (tempoPace) {
+      const tempoKm = Math.min(14, 6 + Math.round(racePlan!.qualityLevel * 1.5));
+      return buildPaceTempoSession(
+        userId,
+        plannedDate,
+        tempoKm,
+        tempoPace,
+        racePlan!.keySession === "mp_tempo" ? "marathon" : "semi",
+        indoor,
+        calibration
+      );
+    }
+
     if (role === "threshold") {
       const variant: SessionVariant = indoor ? "classic" : alternateVariant ? "fartlek" : "classic";
-      return buildThresholdSession(userId, plannedDate, qualityLevel, variant, indoor, calibration, reduction);
+      return buildThresholdSession(userId, plannedDate, qualityLevel, variant, indoor, calibration, reduction || racePlan?.phase === "taper");
     }
     const variant: SessionVariant = indoor ? "hills" : alternateVariant ? "hills" : "classic";
     return buildVo2maxSession(userId, plannedDate, qualityLevel, variant, indoor, calibration);
