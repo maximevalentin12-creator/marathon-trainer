@@ -10,6 +10,7 @@ import {
 } from "@/lib/planner";
 import type { PlanOverview, PlanSessionDto, PlanWeekDto } from "@/lib/racePlanOverview";
 import RaceSheet from "@/components/RaceSheet";
+import { fmtDayMonthFr as fmtDay, fmtWeekdayDayFr as fmtWeekday } from "@/lib/dateFr";
 
 const SESSION_KIND_FR: Record<string, string> = {
   easy: "Footing facile",
@@ -19,14 +20,6 @@ const SESSION_KIND_FR: Record<string, string> = {
   rest: "Repos",
   race: "Course",
 };
-
-function fmtDay(iso: string): string {
-  return new Date(iso + "T12:00:00Z").toLocaleDateString("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
-}
-
-function fmtWeekday(iso: string): string {
-  return new Date(iso + "T12:00:00Z").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", timeZone: "UTC" });
-}
 
 function fmtRange(week: PlanWeekDto): string {
   return `${fmtDay(week.weekStart)} – ${fmtDay(week.weekEnd)}`;
@@ -84,11 +77,12 @@ function WeekDetail({ week, isCurrent }: { week: PlanWeekDto; isCurrent: boolean
               {week.raceNames.length > 0 ? "Volume (course incluse pour une course de préparation)" : "Volume"} :{" "}
               <span className="font-medium">{week.targetKm} km</span>
             </li>
-            <li>
-              Sortie longue :{" "}
-              <span className="font-medium">{week.longRunMin > 0 ? fmtDuration(week.longRunMin) : "aucune"}</span>
-              {week.mpKm > 0 && <> dont {week.mpKm} km à allure marathon</>}
-            </li>
+            {week.longRunMin > 0 && (
+              <li>
+                Sortie longue : <span className="font-medium">{fmtDuration(week.longRunMin)}</span>
+                {week.mpKm > 0 && <> dont {week.mpKm} km à allure marathon</>}
+              </li>
+            )}
             <li>
               Séance clé : <span className="font-medium">{KEY_SESSION_LABEL_FR[week.keySession]}</span>
             </li>
@@ -150,8 +144,12 @@ function WeekRow({
           </span>
           <span className="text-sm text-gray-700 tabular-nums">
             {week.targetKm} km
-            <span className="text-gray-300"> · </span>
-            Longue {week.longRunMin > 0 ? fmtDuration(week.longRunMin) : "—"}
+            {week.longRunMin > 0 && (
+              <>
+                <span className="text-gray-300"> · </span>
+                Longue {fmtDuration(week.longRunMin)}
+              </>
+            )}
             {week.mpKm > 0 && (
               <>
                 <span className="text-gray-300"> · </span>
@@ -227,6 +225,10 @@ export default function PlanPage() {
         )}
       </header>
 
+      <section id="courses" className="mb-8 scroll-mt-4">
+        <h2 className="text-base font-semibold mb-3">Mes courses</h2>
+        <RaceSheet onChanged={() => userId && load(userId)} />
+      </section>
       {userId === null && (
         <p className="text-sm text-gray-600">
           <a href="/onboarding" className="underline">
@@ -297,10 +299,6 @@ export default function PlanPage() {
         </div>
       )}
 
-      <section id="courses" className="mt-10 scroll-mt-4">
-        <h2 className="text-base font-semibold mb-3">Mes courses</h2>
-        <RaceSheet onChanged={() => userId && load(userId)} />
-      </section>
     </main>
   );
 }

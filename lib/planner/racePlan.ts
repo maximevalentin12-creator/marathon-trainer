@@ -539,7 +539,6 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
       continue;
     }
     if (w.isDeload) {
-      w.notes.push("Semaine allégée (75 %) : pas de séance de qualité.");
       continue;
     }
     if (w.qualityFromDay >= 5) {
@@ -613,7 +612,7 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
   // ── Notes common to all weeks ──
   for (const w of weeks) {
     const n = w.weeksToRace;
-    if (w.isDeload) w.notes.push("Semaine de décharge : 75 % du volume et de la sortie longue.");
+    if (w.isDeload) w.notes.push("Semaine de décharge : 75 % du volume et de la sortie longue, pas de séance de qualité.");
     if (peakWeeks.includes(n) && w.longRunMin > 0) w.notes.push(`Pic de sortie longue (S-${n}).`);
   }
   if (peakLong < peakLongMin) {

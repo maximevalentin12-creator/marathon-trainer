@@ -176,7 +176,7 @@ function WeekTable({
                     canExpand ? "cursor-pointer hover:bg-gray-50" : ""
                   } ${r.modality !== "running" ? "text-gray-500" : "text-gray-700"}`}
                 >
-                  <td className="px-3 py-2 whitespace-nowrap capitalize text-gray-500">{fmtDate(r.date)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-gray-500">{fmtDate(r.date)}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-medium">{r.label}</span>
@@ -248,7 +248,7 @@ function WeekCards({
               className="w-full text-left disabled:cursor-default"
             >
               <div className="flex items-baseline justify-between gap-2 mb-1">
-                <span className="text-[11px] text-gray-400 capitalize">{fmtDate(r.date)}</span>
+                <span className="text-[11px] text-gray-400">{fmtDate(r.date)}</span>
                 <StatusBadge status={r.status} />
               </div>
               <div className="flex items-center gap-1.5 flex-wrap mb-1.5">

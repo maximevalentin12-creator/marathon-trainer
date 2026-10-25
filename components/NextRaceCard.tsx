@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PHASE_LABEL_FR, PHASE_STYLE, PHASE_WHY_FR } from "@/lib/planner";
+import { fmtDateLongFr } from "@/lib/dateFr";
 import type { PlanOverview } from "@/lib/racePlanOverview";
 
 /** "Prochaine course" on the home screen: the goal race, its countdown and the phase the plan is in. */
@@ -36,13 +37,6 @@ export default function NextRaceCard() {
 
   const days = Math.round((Date.parse(goal.date) - Date.parse(overview.today)) / 86_400_000);
   const week = overview.weeks.find((w) => w.weekStart === overview.currentWeekStart) ?? null;
-  const date = new Date(goal.date + "T12:00:00Z").toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 
   return (
     <div>
@@ -51,8 +45,8 @@ export default function NextRaceCard() {
         <span className="mx-2 text-gray-300">·</span>
         {goal.name}
       </p>
-      <p className="text-xs text-gray-500 mt-0.5 capitalize">
-        {date} · {String(goal.distanceKm).replace(".", ",")} km
+      <p className="text-xs text-gray-500 mt-0.5">
+        {fmtDateLongFr(goal.date)} · {String(goal.distanceKm).replace(".", ",")} km
       </p>
       {week && (
         <div className="mt-3">

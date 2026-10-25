@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { daysUntilRace, parseIsoDate, RACE_PAIN_WARNING } from "@/lib/planner";
+import { fmtDateLongFr as fmtDateFr } from "@/lib/dateFr";
 
 interface RaceRow {
   id: string;
@@ -65,17 +66,6 @@ function todayIso(): string {
 
 function fmtKm(km: number): string {
   return Number(km).toLocaleString("fr-FR", { maximumFractionDigits: 3 });
-}
-
-/** "dimanche 18 octobre 2026" — spelled out, so a wrong month is obvious. */
-function fmtDateFr(iso: string): string {
-  return new Date(iso + "T12:00:00Z").toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 }
 
 function fmtCountdown(days: number): string {
@@ -252,7 +242,7 @@ export default function RaceSheet({ onChanged }: { onChanged?: () => void }) {
           <p className="text-sm font-semibold tabular-nums text-gray-900 shrink-0">{fmtCountdown(days)}</p>
         </div>
         <p className="text-xs text-gray-500 mt-0.5">
-          {fmtKm(race.distance_km)} km · <span className="capitalize">{fmtDateFr(race.race_date)}</span>
+          {fmtKm(race.distance_km)} km · {fmtDateFr(race.race_date)}
         </p>
         <p className="text-xs text-gray-500 mt-0.5">
           {BIB_LABEL[race.bib_status ?? "confirmed"]}
@@ -318,7 +308,7 @@ export default function RaceSheet({ onChanged }: { onChanged?: () => void }) {
                   {r.name} · {fmtKm(r.distance_km)} km
                   {r.result_time_s ? ` · ${fmtTime(r.result_time_s)}` : ""}
                 </p>
-                <p className="text-xs text-gray-500 capitalize">{fmtDateFr(r.race_date)}</p>
+                <p className="text-xs text-gray-500">{fmtDateFr(r.race_date)}</p>
                 <div className="flex items-center gap-4 mt-1">
                   <button type="button" disabled={busy} onClick={() => startEdit(r)} className="min-h-[36px] text-sm text-gray-700 underline">
                     Corriger

@@ -243,7 +243,7 @@ function SessionCard({
   return (
     <div className="border border-gray-200 rounded-lg p-4">
       <div className="flex items-baseline justify-between gap-2 mb-1">
-        <span className="text-xs text-gray-400 capitalize">{fmtDay(session.planned_date)}</span>
+        <span className="text-xs text-gray-400">{fmtDay(session.planned_date)}</span>
         <div className="flex items-center gap-1.5">
           {session.indoor && !isRest && (
             <span className="text-[10px] uppercase tracking-wide text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">
