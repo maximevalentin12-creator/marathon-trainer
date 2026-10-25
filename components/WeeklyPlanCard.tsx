@@ -440,15 +440,17 @@ function SetupForm({
   ) => void;
   submitting: boolean;
 }) {
-  const [total, setTotal] = useState(Math.min(4, Math.max(1, initialRuns + initialNonImpact)));
-  const [runs, setRuns] = useState(Math.min(initialRuns, total));
-  const [indoor, setIndoor] = useState(Math.min(initialIndoor, initialRuns));
+  // Running sessions: 3 to 5 a week (4 by default). Non-impact cardio is an optional extra on top.
+  const [runs, setRuns] = useState(Math.min(5, Math.max(3, initialRuns)));
+  const [extra, setExtra] = useState(Math.min(2, initialNonImpact));
+  const [indoor, setIndoor] = useState(Math.min(initialIndoor, Math.min(5, Math.max(3, initialRuns))));
   const [machines, setMachines] = useState<NonImpactMachine[]>(initialMachines);
   const [days, setDays] = useState<DayCode[]>(
     initialAvailableDays.length > 0 ? initialAvailableDays : [...DAY_CODES]
   );
 
-  const nonImpact = total - runs;
+  const nonImpact = extra;
+  const total = runs + extra;
 
   function toggleMachine(m: NonImpactMachine) {
     setMachines((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
@@ -464,20 +466,23 @@ function SetupForm({
   return (
     <div className="space-y-4">
       <div>
-        <span className="text-xs text-gray-500 block mb-2">Combien de séances cette semaine, au total ?</span>
+        <span className="text-xs text-gray-500 block mb-2">
+          Combien de sorties course à pied cette semaine ?
+          {isSuggestion && <span className="text-gray-400"> (conseillé : 4)</span>}
+        </span>
         <div className="flex gap-2">
-          {([1, 2, 3, 4] as const).map((n) => (
+          {([3, 4, 5] as const).map((n) => (
             <button
               key={n}
               type="button"
               onClick={() => {
-                setTotal(n);
-                if (runs > n) setRuns(n);
+                setRuns(n);
+                if (indoor > n) setIndoor(n);
               }}
-              className={`px-5 py-1.5 text-sm rounded border transition-colors ${
-                total === n
+              className={`px-6 py-2.5 min-h-[44px] text-base rounded-lg border transition-colors ${
+                runs === n
                   ? "bg-gray-800 text-white border-gray-800"
-                  : "border-gray-200 text-gray-600 hover:border-gray-400"
+                  : "border-gray-200 text-gray-700 hover:border-gray-400"
               }`}
             >
               {n}
@@ -487,36 +492,23 @@ function SetupForm({
       </div>
 
       <div>
-        <span className="text-xs text-gray-500 block mb-2">
-          Combien de ces {total} sont des sorties course à pied ?
-          {isSuggestion && (
-            <span className="text-gray-400"> (suggestion : {Math.min(initialRuns, total)})</span>
-          )}
-        </span>
+        <span className="text-xs text-gray-500 block mb-2">En plus, des séances sans impact (vélo, élliptique) ?</span>
         <div className="flex gap-2">
-          {Array.from({ length: total + 1 }, (_, i) => i).map((n) => (
+          {([0, 1, 2] as const).map((n) => (
             <button
               key={n}
               type="button"
-              onClick={() => {
-                setRuns(n);
-                if (indoor > n) setIndoor(n);
-              }}
-              className={`px-5 py-1.5 text-sm rounded border transition-colors ${
-                runs === n
+              onClick={() => setExtra(n)}
+              className={`px-6 py-2.5 min-h-[44px] text-base rounded-lg border transition-colors ${
+                extra === n
                   ? "bg-gray-800 text-white border-gray-800"
-                  : "border-gray-200 text-gray-600 hover:border-gray-400"
+                  : "border-gray-200 text-gray-700 hover:border-gray-400"
               }`}
             >
               {n}
             </button>
           ))}
         </div>
-        {nonImpact > 0 && (
-          <p className="text-xs text-gray-400 mt-1.5">
-            → {nonImpact} en cardio sans impact (vélo, assault bike, élliptique).
-          </p>
-        )}
       </div>
 
       {runs > 0 && (
@@ -528,7 +520,7 @@ function SetupForm({
                 key={n}
                 type="button"
                 onClick={() => setIndoor(n)}
-                className={`px-5 py-1.5 text-sm rounded border transition-colors ${
+                className={`px-5 py-2.5 min-h-[44px] text-base rounded-lg border transition-colors ${
                   indoor === n
                     ? "bg-gray-800 text-white border-gray-800"
                     : "border-gray-200 text-gray-600 hover:border-gray-400"
@@ -550,7 +542,7 @@ function SetupForm({
                 key={m}
                 type="button"
                 onClick={() => toggleMachine(m)}
-                className={`px-3 py-1.5 text-sm rounded border transition-colors ${
+                className={`px-3.5 py-2.5 min-h-[44px] text-sm rounded-lg border transition-colors ${
                   machines.includes(m)
                     ? "bg-gray-800 text-white border-gray-800"
                     : "border-gray-200 text-gray-600 hover:border-gray-400"
@@ -574,7 +566,7 @@ function SetupForm({
               key={d}
               type="button"
               onClick={() => toggleDay(d)}
-              className={`px-3 py-1.5 text-sm rounded border transition-colors ${
+              className={`px-3.5 py-2.5 min-h-[44px] text-sm rounded-lg border transition-colors ${
                 days.includes(d)
                   ? "bg-gray-800 text-white border-gray-800"
                   : "border-gray-200 text-gray-600 hover:border-gray-400"
@@ -822,7 +814,7 @@ export default function WeeklyPlanCard() {
 
       {showSetupForm ? (
         <SetupForm
-          initialRuns={week?.setup?.runsPerWeek ?? week?.suggestedRunsPerWeek ?? 2}
+          initialRuns={week?.setup?.runsPerWeek ?? 4}
           initialIndoor={week?.setup?.indoorRuns ?? 0}
           initialNonImpact={week?.setup?.nonImpactSessions ?? 0}
           initialMachines={week?.setup?.nonImpactMachines ?? []}

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import ServiceWorkerRegistrar from "@/components/ServiceWorkerRegistrar";
+import TabBar from "@/components/TabBar";
 
 export const metadata: Metadata = {
   title: "Marathon Trainer",
@@ -17,6 +18,7 @@ export const viewport: Viewport = {
   themeColor: "#4a7c3f",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -24,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="fr">
       <body className="bg-surface min-h-screen font-sans antialiased text-gray-900">
         <ServiceWorkerRegistrar />
+        <TabBar />
         {children}
       </body>
     </html>

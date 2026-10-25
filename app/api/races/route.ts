@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { racePainWarnings, validateRaceFields } from "@/lib/races";
+import { loadRaceRows, racePainWarnings, RACE_RESPONSE_COLUMNS, validateRaceFields } from "@/lib/races";
 
 /**
  * GET /api/races?userId=<uuid>
@@ -12,16 +12,14 @@ export async function GET(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
 
   const db = createServiceClient();
-  const { data, error } = await db
-    .from("races")
-    .select("id, name, race_date, distance_km")
-    .eq("user_id", userId)
-    .order("race_date", { ascending: true });
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  let races;
+  try {
+    races = await loadRaceRows(db, userId);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
 
   // Pain >= 3 in the 48 h before a race: the race isn't downgraded, but the card warns.
-  const races = data ?? [];
   let warned: Set<string>;
   try {
     warned = await racePainWarnings(db, userId, races.map((r) => r.race_date as string));
@@ -51,11 +49,16 @@ export async function POST(req: NextRequest) {
   const fields = validateRaceFields(body, true);
   if ("error" in fields) return NextResponse.json({ error: fields.error }, { status: 400 });
 
+  // A new race is in the future (a past one is only ever corrected, never created).
+  if (fields.values.race_date && fields.values.race_date < new Date().toISOString().slice(0, 10)) {
+    return NextResponse.json({ error: "La date de la course doit être dans le futur." }, { status: 400 });
+  }
+
   const db = createServiceClient();
   const { data, error } = await db
     .from("races")
     .insert({ user_id: userId, ...fields.values })
-    .select("id, name, race_date, distance_km")
+    .select(RACE_RESPONSE_COLUMNS)
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

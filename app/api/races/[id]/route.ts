@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
-import { validateRaceFields } from "@/lib/races";
+import { RACE_RESPONSE_COLUMNS, validateRaceFields } from "@/lib/races";
 
 /**
  * PATCH /api/races/:id
- * Body: { userId, ...any subset of name/raceDate/distanceKm }
+ * Body: { userId, ...any subset of name/raceDate/distanceKm/kind/parentRaceId/bibStatus/targetTimeS/resultTimeS }
  */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   let body: Record<string, unknown>;
@@ -26,7 +26,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     .update(fields.values)
     .eq("id", params.id)
     .eq("user_id", userId)
-    .select("id, name, race_date, distance_km")
+    .select(RACE_RESPONSE_COLUMNS)
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

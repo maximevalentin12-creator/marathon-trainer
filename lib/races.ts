@@ -49,6 +49,29 @@ export function raceFromRow(row: RaceRow): Race {
   };
 }
 
+/** The user's races as rows, oldest first, with the planner columns when the migration has run. */
+export async function loadRaceRows(db: ServiceClient, userId: string): Promise<RaceRow[]> {
+  const first = (await db
+    .from("races")
+    .select(PLANNER_RACE_COLUMNS)
+    .eq("user_id", userId)
+    .order("race_date", { ascending: true })) as { data: RaceRow[] | null; error: { code?: string; message: string } | null };
+  if (first.error?.code !== UNDEFINED_COLUMN) {
+    if (first.error) throw new Error(first.error.message);
+    return first.data ?? [];
+  }
+  const { data, error } = await db
+    .from("races")
+    .select(RACE_COLUMNS)
+    .eq("user_id", userId)
+    .order("race_date", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as RaceRow[];
+}
+
+/** Columns a race endpoint returns. */
+export const RACE_RESPONSE_COLUMNS = PLANNER_RACE_COLUMNS;
+
 /** All the user's races, oldest first. Empty (with a warning) until the races migration is applied. */
 export async function loadRaces(db: ServiceClient, userId: string): Promise<Race[]> {
   let { data, error } = (await db

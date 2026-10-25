@@ -82,3 +82,4 @@ export {
 export type { RaceResult, RacePredictions, TrainingPaces } from "./paces";
 export { resolveRacePlanWeek, activeGoalRace, goalRecoveryMode, trainingPhaseOf, isRaceActivity } from "./racePlanWeek";
 export type { ResolvedRacePlanWeek, RacePlanWeekParams } from "./racePlanWeek";
+export { PHASE_LABEL_FR, PHASE_WHY_FR, PHASE_STYLE, KEY_SESSION_LABEL_FR, fmtDuration } from "./labels";

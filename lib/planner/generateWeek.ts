@@ -156,11 +156,31 @@ export async function regenerateWeekSessions(
     .gte("start_time", activityCutoff.toISOString());
   if (activitiesError) return { error: activitiesError.message, status: 500 };
 
-  const activitySamples = (activities ?? []).map((a) => ({
-    startTime: new Date(a.start_time),
-    durationSeconds: a.duration_seconds ?? 0,
-    activityType: a.activity_type,
-  }));
+  // Races are not training runs: the anchor — like the race planner's — skips them (Garmin's race flag, or
+  // an activity on a races row's date at about its distance).
+  let races;
+  try {
+    races = await loadRaces(db, userId);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err), status: 500 };
+  }
+  const activitySamples = (activities ?? [])
+    .filter(
+      (a) =>
+        !isRaceActivity(
+          {
+            startTime: new Date(a.start_time),
+            distanceKm: (a.distance_meters ?? 0) / 1000,
+            eventType: (a as { event_type?: string | null }).event_type,
+          },
+          races
+        )
+    )
+    .map((a) => ({
+      startTime: new Date(a.start_time),
+      durationSeconds: a.duration_seconds ?? 0,
+      activityType: a.activity_type,
+    }));
   const longRunAnchorMinutes = computeLongRunAnchorMinutes(activitySamples);
 
   // Load or create progression state.
@@ -201,12 +221,6 @@ export async function regenerateWeekSessions(
   // stored long run for the weeks around a race — and never touches
   // progression_state: no block evaluation, no write. After the recovery
   // week the block clock restarts.
-  let races;
-  try {
-    races = await loadRaces(db, userId);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err), status: 500 };
-  }
   // Backward race planner: with a goal race ahead it supplies the week's volume, long run and key
   // session, and the progression engine stays out (no block evaluation, no write). Without one the
   // continuous mode — and the legacy race mode around a lone race — runs unchanged.
