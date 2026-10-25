@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createOAuthClient } from "@/lib/google/client";
-import { createServiceClient } from "@/lib/supabase";
+import { createOAuthClient, GOOGLE_STATE_COOKIE } from "@/lib/google/client";
+import { requireUser } from "@/lib/auth/server";
 import { watchUserCalendar } from "@/lib/google/sync";
 
 /**
@@ -10,15 +10,24 @@ import { watchUserCalendar } from "@/lib/google/sync";
  * Google Calendar flow back into planned_sessions.
  */
 export async function GET(req: NextRequest) {
+  // The user is the signed-in one (the browser carries the session cookie); `state` only has to match the
+  // one-time value /api/google/auth stored in a cookie, so nobody can attach their tokens to someone else's id.
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db: supabase } = auth;
   const code = req.nextUrl.searchParams.get("code");
-  const userId = req.nextUrl.searchParams.get("state");
+  const state = req.nextUrl.searchParams.get("state");
+  const expectedState = req.cookies.get(GOOGLE_STATE_COOKIE)?.value;
   const oauthError = req.nextUrl.searchParams.get("error");
 
   if (oauthError) {
     return NextResponse.json({ error: `Google OAuth error: ${oauthError}` }, { status: 400 });
   }
-  if (!code || !userId) {
-    return NextResponse.json({ error: "Missing code or state (userId) from Google redirect." }, { status: 400 });
+  if (!code || !state) {
+    return NextResponse.json({ error: "Missing code or state from Google redirect." }, { status: 400 });
+  }
+  if (!expectedState || state !== expectedState) {
+    return NextResponse.json({ error: "Invalid OAuth state — restart the Google connection." }, { status: 400 });
   }
 
   try {
@@ -35,7 +44,6 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = createServiceClient();
     const { error } = await supabase.from("google_oauth_tokens").upsert({
       user_id: userId,
       access_token: tokens.access_token ?? "",
@@ -53,7 +61,7 @@ export async function GET(req: NextRequest) {
     let watch: Awaited<ReturnType<typeof watchUserCalendar>> | null = null;
     let watchError: string | null = null;
     try {
-      watch = await watchUserCalendar(userId);
+      watch = await watchUserCalendar(supabase, userId);
     } catch (err) {
       // Don't fail the whole connect flow if the webhook watch can't be set
       // up (e.g. APP_BASE_URL not public HTTPS yet in local dev) — the user

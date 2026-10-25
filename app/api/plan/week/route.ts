@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import {
   toMonday,
   isoDate,
@@ -17,20 +17,19 @@ import { attachRacePainWarnings } from "@/lib/races";
 const ALL_DAYS: DayCode[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 /**
- * GET /api/plan/week?userId=<uuid>&weekStart=<YYYY-MM-DD>
+ * GET /api/plan/week?weekStart=<YYYY-MM-DD>
  * Returns the weekly setup (if any) and generated sessions for that week.
  * weekStart defaults to the Monday of the current week.
  */
 export async function GET(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const params = new URL(req.url).searchParams;
-  const userId = params.get("userId");
-  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
 
   const weekStart = params.get("weekStart") ? parseIsoDate(params.get("weekStart")!) : toMonday(new Date());
   const weekStartIso = isoDate(weekStart);
   const weekEndIso = isoDate(new Date(weekStart.getTime() + 7 * 86_400_000));
-
-  const db = createServiceClient();
 
   const [{ data: setup }, { data: sessions, error: sessionsError }, { data: state }, zones] = await Promise.all([
     db
@@ -78,7 +77,7 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/plan/week
- * Body: { userId, weekStart?: "YYYY-MM-DD", runsPerWeek: number, indoorRuns: number,
+ * Body: { weekStart?: "YYYY-MM-DD", runsPerWeek: number, indoorRuns: number,
  *         nonImpactSessions?: number, nonImpactMachines?: NonImpactMachine[], availableDays?: DayCode[] }
  *
  * Records the weekly setup choice, runs the progression engine if this week
@@ -90,6 +89,9 @@ export async function GET(req: NextRequest) {
  * on replaced sessions are carried forward.
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -98,7 +100,6 @@ export async function POST(req: NextRequest) {
   }
 
   const {
-    userId,
     weekStart: weekStartStr,
     runsPerWeek,
     indoorRuns,
@@ -106,7 +107,6 @@ export async function POST(req: NextRequest) {
     nonImpactMachines: nonImpactMachinesBody,
     availableDays: availableDaysBody,
   } = body as {
-    userId: string;
     weekStart?: string;
     runsPerWeek: number;
     indoorRuns: number;
@@ -116,8 +116,6 @@ export async function POST(req: NextRequest) {
   };
 
   const nonImpactSessions = nonImpactSessionsRaw ?? 0;
-
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
   if (!Number.isInteger(runsPerWeek) || runsPerWeek < 3 || runsPerWeek > 5) {
     return NextResponse.json({ error: "runsPerWeek must be an integer between 3 and 5." }, { status: 400 });
   }
@@ -170,8 +168,6 @@ export async function POST(req: NextRequest) {
   const weekStart = weekStartStr ? parseIsoDate(weekStartStr) : toMonday(new Date());
   const weekStartIso = isoDate(weekStart);
 
-  const db = createServiceClient();
-
   // Record the weekly setup choice — the user's choice always wins over any suggestion.
   const { error: setupError } = await db.from("weekly_setups").upsert(
     {
@@ -188,6 +184,7 @@ export async function POST(req: NextRequest) {
   if (setupError) return NextResponse.json({ error: setupError.message }, { status: 500 });
 
   const result = await regenerateWeekSessions({
+    db,
     userId,
     weekStart,
     runsPerWeek,

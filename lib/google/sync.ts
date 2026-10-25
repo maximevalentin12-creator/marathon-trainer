@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import type { calendar_v3 } from "googleapis";
-import { createServiceClient } from "@/lib/supabase";
+import type { Db } from "@/lib/supabase";
 import { getAuthorizedClient, getCalendarClient } from "@/lib/google/client";
 
 const DEFAULT_CALENDAR_ID = "primary";
@@ -91,9 +91,8 @@ export interface PushResult {
 }
 
 /** Pushes every planned_sessions row for `userId` whose data has changed since the last sync. */
-export async function pushUserSessions(userId: string, calendarId = DEFAULT_CALENDAR_ID): Promise<PushResult> {
-  const supabase = createServiceClient();
-  const auth = await getAuthorizedClient(userId);
+export async function pushUserSessions(supabase: Db, userId: string, calendarId = DEFAULT_CALENDAR_ID): Promise<PushResult> {
+  const auth = await getAuthorizedClient(supabase, userId);
   const calendar = getCalendarClient(auth);
 
   const { data: rows, error } = await supabase
@@ -166,7 +165,7 @@ export interface PullResult {
 async function processEvent(
   event: calendar_v3.Schema$Event,
   userId: string,
-  supabase: ReturnType<typeof createServiceClient>,
+  supabase: Db,
   result: PullResult
 ) {
   if (!event.id) return;
@@ -218,9 +217,8 @@ async function processEvent(
  * Uses an incremental sync token when we have one; otherwise performs a full
  * listing and stores the resulting token for next time.
  */
-export async function runIncrementalSync(userId: string, calendarId = DEFAULT_CALENDAR_ID): Promise<PullResult> {
-  const supabase = createServiceClient();
-  const auth = await getAuthorizedClient(userId);
+export async function runIncrementalSync(supabase: Db, userId: string, calendarId = DEFAULT_CALENDAR_ID): Promise<PullResult> {
+  const auth = await getAuthorizedClient(supabase, userId);
   const calendar = getCalendarClient(auth);
 
   const { data: syncState } = await supabase
@@ -257,7 +255,7 @@ export async function runIncrementalSync(userId: string, calendarId = DEFAULT_CA
     if (status === 410 && syncToken) {
       // Sync token expired/invalid — drop it and do a full resync.
       await supabase.from("google_calendar_sync").upsert({ user_id: userId, calendar_id: calendarId, sync_token: null });
-      return runIncrementalSync(userId, calendarId);
+      return runIncrementalSync(supabase, userId, calendarId);
     }
     throw err;
   }
@@ -287,13 +285,12 @@ export interface WatchInfo {
  * Requires APP_BASE_URL to be a public HTTPS address — Google will reject
  * plain-http or non-public webhook URLs (e.g. localhost).
  */
-export async function watchUserCalendar(userId: string, calendarId = DEFAULT_CALENDAR_ID): Promise<WatchInfo> {
+export async function watchUserCalendar(supabase: Db, userId: string, calendarId = DEFAULT_CALENDAR_ID): Promise<WatchInfo> {
   // Ensure we have a sync token before watching, so the first webhook-driven
   // incremental sync has a baseline to diff against.
-  await runIncrementalSync(userId, calendarId);
+  await runIncrementalSync(supabase, userId, calendarId);
 
-  const supabase = createServiceClient();
-  const auth = await getAuthorizedClient(userId);
+  const auth = await getAuthorizedClient(supabase, userId);
   const calendar = getCalendarClient(auth);
 
   const appBaseUrl = process.env.APP_BASE_URL;

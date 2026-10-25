@@ -10,12 +10,7 @@ export default function NextRaceCard() {
   const [overview, setOverview] = useState<PlanOverview | null | undefined>(undefined);
 
   useEffect(() => {
-    const userId = localStorage.getItem("marathon_user_id");
-    if (!userId) {
-      setOverview(null);
-      return;
-    }
-    fetch(`/api/plan/overview?userId=${userId}`)
+    fetch("/api/plan/overview")
       .then((r) => (r.ok ? r.json() : null))
       .then(setOverview)
       .catch(() => setOverview(null));

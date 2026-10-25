@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import { loadRaceRows, racePainWarnings, RACE_RESPONSE_COLUMNS, validateRaceFields } from "@/lib/races";
 
 /**
- * GET /api/races?userId=<uuid>
+ * GET /api/races
  * Lists the user's races, soonest first, each with `pain_warning` (pain >= 3
  * reported in the 48 h before it).
  */
 export async function GET(req: NextRequest) {
-  const userId = new URL(req.url).searchParams.get("userId");
-  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
-
-  const db = createServiceClient();
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   let races;
   try {
     races = await loadRaceRows(db, userId);
@@ -31,20 +30,20 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/races
- * Body: { userId, name, raceDate: "YYYY-MM-DD", distanceKm }
+ * Body: { name, raceDate: "YYYY-MM-DD", distanceKm }
  * Creates a race. Week plans already generated aren't touched — regenerate a
  * week for race mode to reshape it.
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
-
-  const { userId } = body as { userId?: string };
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
 
   const fields = validateRaceFields(body, true);
   if ("error" in fields) return NextResponse.json({ error: fields.error }, { status: 400 });
@@ -53,8 +52,6 @@ export async function POST(req: NextRequest) {
   if (fields.values.race_date && fields.values.race_date < new Date().toISOString().slice(0, 10)) {
     return NextResponse.json({ error: "La date de la course doit être dans le futur." }, { status: 400 });
   }
-
-  const db = createServiceClient();
   const { data, error } = await db
     .from("races")
     .insert({ user_id: userId, ...fields.values })

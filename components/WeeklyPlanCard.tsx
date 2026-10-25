@@ -599,7 +599,6 @@ function SetupForm({
 
 export default function WeeklyPlanCard() {
   const [phase, setPhase] = useState<Phase>("loading");
-  const [userId, setUserId] = useState<string | null>(null);
   const [week, setWeek] = useState<WeekResponse | null>(null);
   const [shoes, setShoes] = useState<ShoeOption[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -607,10 +606,10 @@ export default function WeeklyPlanCard() {
   const [movingSessionId, setMovingSessionId] = useState<string | null>(null);
   const [settingShoeSessionId, setSettingShoeSessionId] = useState<string | null>(null);
 
-  const load = useCallback(async (uid: string) => {
+  const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await fetch(`/api/plan/week?userId=${uid}`);
+      const r = await fetch("/api/plan/week");
       const data: WeekResponse = await r.json();
       setWeek(data);
       setPhase(data.setup ? "ready" : "setup");
@@ -620,9 +619,9 @@ export default function WeeklyPlanCard() {
     }
   }, []);
 
-  const loadShoes = useCallback(async (uid: string) => {
+  const loadShoes = useCallback(async () => {
     try {
-      const r = await fetch(`/api/shoes?userId=${uid}`);
+      const r = await fetch("/api/shoes");
       const data = await r.json();
       if (r.ok && !data.error) setShoes(data.shoes);
     } catch {
@@ -631,14 +630,8 @@ export default function WeeklyPlanCard() {
   }, []);
 
   useEffect(() => {
-    const id = localStorage.getItem("marathon_user_id");
-    if (!id) {
-      setPhase("no-user");
-      return;
-    }
-    setUserId(id);
-    void load(id);
-    void loadShoes(id);
+    void load();
+    void loadShoes();
   }, [load, loadShoes]);
 
   async function handleGenerate(
@@ -648,14 +641,13 @@ export default function WeeklyPlanCard() {
     nonImpactMachines: NonImpactMachine[],
     availableDays: DayCode[]
   ) {
-    if (!userId) return;
     setPhase("saving");
     setError(null);
     try {
       const r = await fetch("/api/plan/week", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, runsPerWeek, indoorRuns, nonImpactSessions, nonImpactMachines, availableDays }),
+        body: JSON.stringify({ runsPerWeek, indoorRuns, nonImpactSessions, nonImpactMachines, availableDays }),
       });
       const data = await r.json();
       if (!r.ok || data.error) {
@@ -680,14 +672,13 @@ export default function WeeklyPlanCard() {
   }
 
   async function handleMove(sessionId: string, dayCode: DayCode) {
-    if (!userId) return;
     setMovingSessionId(sessionId);
     setError(null);
     try {
       const r = await fetch("/api/plan/session", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, sessionId, action: "move", dayCode }),
+        body: JSON.stringify({ sessionId, action: "move", dayCode }),
       });
       const data = await r.json();
       if (!r.ok || data.error) {
@@ -712,14 +703,13 @@ export default function WeeklyPlanCard() {
   }
 
   async function handleReset(sessionId: string) {
-    if (!userId) return;
     setMovingSessionId(sessionId);
     setError(null);
     try {
       const r = await fetch("/api/plan/session", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, sessionId, action: "reset" }),
+        body: JSON.stringify({ sessionId, action: "reset" }),
       });
       const data = await r.json();
       if (!r.ok || data.error) {
@@ -735,14 +725,13 @@ export default function WeeklyPlanCard() {
   }
 
   async function handleSkip(sessionId: string, skipped: boolean) {
-    if (!userId) return;
     setMovingSessionId(sessionId);
     setError(null);
     try {
       const r = await fetch("/api/plan/session", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, sessionId, action: "skip", skipped }),
+        body: JSON.stringify({ sessionId, action: "skip", skipped }),
       });
       const data = await r.json();
       if (!r.ok || data.error) {
@@ -763,14 +752,13 @@ export default function WeeklyPlanCard() {
   }
 
   async function handleSetShoe(sessionId: string, shoeId: string | null) {
-    if (!userId) return;
     setSettingShoeSessionId(sessionId);
     setError(null);
     try {
       const r = await fetch("/api/plan/session", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, sessionId, action: "setShoe", shoeId }),
+        body: JSON.stringify({ sessionId, action: "setShoe", shoeId }),
       });
       const data = await r.json();
       if (!r.ok || data.error) {
@@ -782,7 +770,7 @@ export default function WeeklyPlanCard() {
           ? { ...prev, sessions: prev.sessions.map((s) => (s.id === data.session.id ? { ...s, ...data.session } : s)) }
           : prev
       );
-      await loadShoes(userId);
+      await loadShoes();
     } catch {
       setError("La mise à jour a échoué.");
     } finally {

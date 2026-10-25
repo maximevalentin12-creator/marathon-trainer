@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 
 /**
- * GET /api/shoes?userId=<uuid>
+ * GET /api/shoes
  * Lists all shoes (active and retired) for a user, newest first.
  */
 export async function GET(req: NextRequest) {
-  const userId = new URL(req.url).searchParams.get("userId");
-  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
-
-  const db = createServiceClient();
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const { data, error } = await db
     .from("shoes")
     .select("*")
@@ -22,12 +21,15 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/shoes
- * Body: { userId, name, brand?, model?, dropMm?, stackHeelMm?, stackForefootMm?,
+ * Body: { name, brand?, model?, dropMm?, stackHeelMm?, stackForefootMm?,
  *         weightG?, usageType?, imageUrl?, notes?, totalKm? }
  * Creates a new pair. totalKm defaults to 0 (only useful for seeding an
  * already-worn pair — new links via /api/plan/session accumulate from there).
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -36,7 +38,6 @@ export async function POST(req: NextRequest) {
   }
 
   const {
-    userId,
     name,
     brand,
     model,
@@ -49,7 +50,6 @@ export async function POST(req: NextRequest) {
     notes,
     totalKm,
   } = body as {
-    userId?: string;
     name?: string;
     brand?: string | null;
     model?: string | null;
@@ -62,11 +62,7 @@ export async function POST(req: NextRequest) {
     notes?: string | null;
     totalKm?: number | null;
   };
-
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
   if (!name || !name.trim()) return NextResponse.json({ error: "name is required." }, { status: 400 });
-
-  const db = createServiceClient();
   const { data, error } = await db
     .from("shoes")
     .insert({

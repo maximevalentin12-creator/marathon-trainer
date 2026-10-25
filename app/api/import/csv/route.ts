@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import { parseGarminCsv, syntheticActivityId } from "@/lib/garmin/parseCsv";
 import { matchGarminActivitiesForUser, reevaluateCompletedSessionsForUser } from "@/lib/garmin/matchSessions";
 import { raiseHrMaxFromObserved } from "@/lib/athlete/profile";
@@ -53,15 +53,14 @@ function activityPatch(existing: Record<string, unknown>, row: ActivityRow): Rec
  * (see activityPatch) instead of inserting a duplicate.
  */
 export async function POST(request: Request) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const form = await request.formData();
   const file = form.get("file");
-  const userId = form.get("userId");
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Missing required file field: file" }, { status: 400 });
-  }
-  if (typeof userId !== "string" || !userId) {
-    return NextResponse.json({ error: "Missing required field: userId" }, { status: 400 });
   }
 
   const text = await file.text();
@@ -103,7 +102,6 @@ export async function POST(request: Request) {
   let errors = 0;
 
   if (rows.length > 0) {
-    const db = createServiceClient();
 
     // An activity whose start_time already exists for this user is the same
     // activity (typically the native Garmin-synced copy, or an earlier CSV
@@ -166,12 +164,12 @@ export async function POST(request: Request) {
   if (inserted + updated > 0) {
     try {
       // Before matching/re-scoring, so both use the raised zones.
-      await raiseHrMaxFromObserved(createServiceClient(), userId);
+      await raiseHrMaxFromObserved(db, userId);
     } catch (err) {
       console.warn(`Skipped observed hr_max update for user ${userId}:`, err);
     }
     try {
-      matched = await matchGarminActivitiesForUser(userId);
+      matched = await matchGarminActivitiesForUser(db, userId);
     } catch (err) {
       console.warn(`Skipped session-completion matching for user ${userId}:`, err);
     }
@@ -179,7 +177,7 @@ export async function POST(request: Request) {
       // Upserted rows may have refreshed an already-linked activity with richer
       // fields (or evaluateCompletion() itself may have gained fields since that
       // session was first matched) — re-score already-completed sessions too.
-      reevaluated = await reevaluateCompletedSessionsForUser(userId);
+      reevaluated = await reevaluateCompletedSessionsForUser(db, userId);
     } catch (err) {
       console.warn(`Skipped re-evaluation of completed sessions for user ${userId}:`, err);
     }

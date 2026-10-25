@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase";
+import type { Db } from "@/lib/supabase";
 import { generateClaudeSuggestions } from "./claudeSuggestions";
 import type { MonthlySummary, RaceSummary } from "./types";
 
@@ -53,8 +53,7 @@ function isRace(row: ActivityRow): boolean {
   return eventType?.typeKey === "race";
 }
 
-export async function buildMonthlySummary(userId: string, month: string): Promise<MonthlySummary> {
-  const db = createServiceClient();
+export async function buildMonthlySummary(db: Db, userId: string, month: string): Promise<MonthlySummary> {
   const { start, end } = monthRange(month);
   const prevMonth = previousMonth(month);
   const { start: prevStart, end: prevEnd } = monthRange(prevMonth);

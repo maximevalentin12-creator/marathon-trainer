@@ -1,5 +1,8 @@
 import { google } from "googleapis";
-import { createServiceClient } from "@/lib/supabase";
+import type { Db } from "@/lib/supabase";
+
+/** Cookie holding the one-time OAuth `state` between /api/google/auth and /api/google/callback. */
+export const GOOGLE_STATE_COOKIE = "google_oauth_state";
 
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
@@ -18,13 +21,14 @@ export function createOAuthClient() {
   );
 }
 
-export function buildAuthUrl(userId: string): string {
+/** `state` is a one-time random value the caller keeps in a cookie and checks on return (CSRF protection). */
+export function buildAuthUrl(state: string): string {
   const client = createOAuthClient();
   return client.generateAuthUrl({
     access_type: "offline", // required to receive a refresh_token
     prompt: "consent",      // force re-consent so we always get a refresh_token
     scope: [CALENDAR_SCOPE],
-    state: userId,
+    state,
   });
 }
 
@@ -40,8 +44,7 @@ interface StoredTokens {
  * Loads stored tokens for a user, returns an OAuth2 client wired to persist
  * any refreshed access token (googleapis refreshes automatically on demand).
  */
-export async function getAuthorizedClient(userId: string) {
-  const supabase = createServiceClient();
+export async function getAuthorizedClient(supabase: Db, userId: string) {
   const { data, error } = await supabase
     .from("google_oauth_tokens")
     .select("access_token, refresh_token, scope, token_type, expiry_date")
@@ -50,7 +53,7 @@ export async function getAuthorizedClient(userId: string) {
 
   if (error || !data) {
     throw new Error(
-      `No Google Calendar connection for user ${userId}. Visit /api/google/auth?userId=${userId} first.`
+      `No Google Calendar connection for user ${userId}. Visit /api/google/auth first.`
     );
   }
 

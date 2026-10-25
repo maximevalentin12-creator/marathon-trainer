@@ -307,16 +307,15 @@ type Phase = "loading" | "ready" | "no-user";
 
 export default function HistoriquePage() {
   const [phase, setPhase] = useState<Phase>("loading");
-  const [userId, setUserId] = useState<string | null>(null);
   const [weeks, setWeeks] = useState<HistoryWeek[]>([]);
   const [nextBefore, setNextBefore] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const loadPage = useCallback(async (uid: string, before: string | null) => {
+  const loadPage = useCallback(async (before: string | null) => {
     setError(null);
-    const qs = new URLSearchParams({ userId: uid });
+    const qs = new URLSearchParams();
     if (before) qs.set("before", before);
     try {
       const r = await fetch(`/api/history?${qs}`);
@@ -334,19 +333,13 @@ export default function HistoriquePage() {
   }, []);
 
   useEffect(() => {
-    const id = localStorage.getItem("marathon_user_id");
-    if (!id) {
-      setPhase("no-user");
-      return;
-    }
-    setUserId(id);
-    void loadPage(id, null).then(() => setPhase("ready"));
+    void loadPage(null).then(() => setPhase("ready"));
   }, [loadPage]);
 
   async function handleLoadMore() {
-    if (!userId || !nextBefore) return;
+    if (!nextBefore) return;
     setLoadingMore(true);
-    await loadPage(userId, nextBefore);
+    await loadPage(nextBefore);
     setLoadingMore(false);
   }
 

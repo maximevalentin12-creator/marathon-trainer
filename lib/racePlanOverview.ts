@@ -1,7 +1,7 @@
 // Server-side loader for the /plan screen: the backward race plan, the user's races and the sessions
 // already generated for the plan's weeks. Read-only.
 
-import type { createServiceClient } from "@/lib/supabase";
+import type { Db } from "@/lib/supabase";
 import { loadRaces } from "@/lib/races";
 import { loadAthleteCalibration } from "@/lib/athlete/profile";
 import { addDays, isoDate, parseIsoDate, toMonday } from "@/lib/planner/dates";
@@ -9,7 +9,7 @@ import { isRaceActivity, resolveRacePlanWeek } from "@/lib/planner/racePlanWeek"
 import { RACE_PAIN_WARNING_MIN_SCORE } from "@/lib/planner/race";
 import type { RaceKeySession, RacePhase } from "@/lib/planner/racePlan";
 
-type ServiceClient = ReturnType<typeof createServiceClient>;
+type ServiceClient = Db;
 
 export interface PlanSessionDto {
   id: string;

@@ -1,6 +1,7 @@
 import GarminSyncCard from "@/components/GarminSyncCard";
 import CsvImportCard from "@/components/CsvImportCard";
 import MonthlyReportCard from "@/components/MonthlyReportCard";
+import SignOutButton from "@/components/SignOutButton";
 
 const LINKS = [
   { href: "/shoes", title: "L'armoire", text: "Tes paires, leurs kilomètres et leur usure." },
@@ -48,6 +49,8 @@ export default function PlusPage() {
           <MonthlyReportCard />
         </Card>
       </div>
+
+      <SignOutButton className="mt-8 w-full px-4 py-3 min-h-[44px] text-sm font-medium border border-gray-300 text-gray-700 rounded-lg hover:border-gray-500 disabled:opacity-50" />
     </main>
   );
 }

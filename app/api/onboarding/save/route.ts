@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import { toMonday, isoDate } from "@/lib/planner";
 
 /** Parse "MM:SS" or "H:MM:SS" → total seconds, null if blank or invalid. */
@@ -17,19 +17,21 @@ function parseTime(s: string | null | undefined): number | null {
 
 /**
  * POST /api/onboarding/save
- * Body: { userId, raceDate?, runsPerWeek, pb5k, pb10k, pbHalf, pbMarathon,
+ * Body: { raceDate?, runsPerWeek, pb5k, pb10k, pbHalf, pbMarathon,
  *         injuryHistory, currentWeeklyKm }
  * Updates the users row with all onboarding answers. The app is
  * continuous/quarterly, not race-anchored, so raceDate is optional context only.
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const body = await req.json().catch(() => null);
   if (!body) {
     return NextResponse.json({ error: "Invalid body." }, { status: 400 });
   }
 
   const {
-    userId,
     raceDate,
     runsPerWeek = 2,
     pb5k,
@@ -39,7 +41,6 @@ export async function POST(req: NextRequest) {
     injuryHistory,
     currentWeeklyKm,
   } = body as {
-    userId: string;
     raceDate?: string | null;
     runsPerWeek: 1 | 2 | 3;
     pb5k?: string;
@@ -49,15 +50,9 @@ export async function POST(req: NextRequest) {
     injuryHistory?: string;
     currentWeeklyKm?: number;
   };
-
-  if (!userId) {
-    return NextResponse.json({ error: "userId is required." }, { status: 400 });
-  }
   if (![1, 2, 3].includes(runsPerWeek)) {
     return NextResponse.json({ error: "runsPerWeek must be 1, 2, or 3." }, { status: 400 });
   }
-
-  const db = createServiceClient();
 
   const { error } = await db
     .from("users")

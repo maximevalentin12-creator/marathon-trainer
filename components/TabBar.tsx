@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import SignOutButton from "@/components/SignOutButton";
 
 const TABS = [
   {
@@ -73,6 +74,9 @@ export default function TabBar() {
               </a>
             </li>
           ))}
+          <li className="ml-auto">
+            <SignOutButton className="text-gray-500 hover:text-gray-900 disabled:opacity-50" />
+          </li>
         </ul>
       </nav>
     </>

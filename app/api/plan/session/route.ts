@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import {
   toMonday,
   isoDate,
@@ -17,9 +17,9 @@ const ALL_DAYS: DayCode[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 /**
  * PATCH /api/plan/session
- * Body: { userId, sessionId, action: "move", dayCode }
- *     | { userId, sessionId, action: "reset" }
- *     | { userId, sessionId, action: "skip", skipped: boolean }
+ * Body: { sessionId, action: "move", dayCode }
+ *     | { sessionId, action: "reset" }
+ *     | { sessionId, action: "skip", skipped: boolean }
  *
  * "move" reassigns one session to a different day within the same week
  * (must be one of that week's available_days, and not already taken by
@@ -33,6 +33,9 @@ const ALL_DAYS: DayCode[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
  * to the new one's.
  */
 export async function PATCH(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -40,14 +43,11 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { userId, sessionId, action } = body as { userId?: string; sessionId?: string; action?: string };
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
+  const { sessionId, action } = body as { sessionId?: string; action?: string };
   if (!sessionId) return NextResponse.json({ error: "sessionId is required." }, { status: 400 });
   if (action !== "move" && action !== "reset" && action !== "skip" && action !== "setShoe") {
     return NextResponse.json({ error: "action must be 'move', 'reset', 'skip', or 'setShoe'." }, { status: 400 });
   }
-
-  const db = createServiceClient();
 
   const { data: session, error: sessionError } = await db
     .from("planned_sessions")
@@ -240,7 +240,7 @@ export async function PATCH(req: NextRequest) {
     if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
     try {
-      await pushUserSessions(userId);
+      await pushUserSessions(db, userId);
     } catch (err) {
       console.warn(`Skipped Google Calendar push for user ${userId}:`, err instanceof Error ? err.message : err);
     }
@@ -256,6 +256,7 @@ export async function PATCH(req: NextRequest) {
   if (clearError) return NextResponse.json({ error: clearError.message }, { status: 500 });
 
   const result = await regenerateWeekSessions({
+    db,
     userId,
     weekStart,
     runsPerWeek: setup.runs_per_week,

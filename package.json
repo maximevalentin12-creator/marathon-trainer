@@ -10,6 +10,7 @@
     "test": "tsx --test lib/planner/*.test.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
     "googleapis": "^144.0.0",
     "next": "^14.2.18",

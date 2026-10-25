@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import {
   HR_MAX_RANGE,
   HR_REST_RANGE,
@@ -10,15 +10,14 @@ import { reevaluateCompletedSessionsForUser } from "@/lib/garmin/matchSessions";
 import { formulaEasyPaceSecPerKm, EASY_PACE_MIN_RUNS, EASY_PACE_WINDOW_DAYS } from "@/lib/planner";
 
 /**
- * GET /api/profile?userId=<uuid>
+ * GET /api/profile
  * The athlete profile (FC max / FC repos with their sources), the zones
  * derived from it, and the easy-pace estimate with what it rests on.
  */
 export async function GET(req: NextRequest) {
-  const userId = new URL(req.url).searchParams.get("userId");
-  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
-
-  const db = createServiceClient();
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   try {
     const { profile, calibration, easyPace } = await loadAthleteCalibration(db, userId);
     return NextResponse.json({
@@ -43,15 +42,17 @@ function inRange(v: unknown, range: { min: number; max: number }): v is number {
 
 /**
  * PUT /api/profile
- * Body: { userId, hrMax, hrRest }
+ * Body: { hrMax, hrRest }
  * A value changed here is a field measurement: it's stored with source
  * field_test (which wins over garmin_settings). Unchanged values keep their
  * source. Completed sessions are then re-scored against the new zones.
  */
 export async function PUT(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const body = await req.json().catch(() => null);
-  const { userId, hrMax, hrRest } = (body ?? {}) as { userId?: string; hrMax?: unknown; hrRest?: unknown };
-  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
+  const { hrMax, hrRest } = (body ?? {}) as { hrMax?: unknown; hrRest?: unknown };
   if (!inRange(hrMax, HR_MAX_RANGE)) {
     return NextResponse.json(
       { error: `FC max invalide (entier entre ${HR_MAX_RANGE.min} et ${HR_MAX_RANGE.max}).` },
@@ -67,8 +68,6 @@ export async function PUT(req: NextRequest) {
   if (hrMax - hrRest < 60) {
     return NextResponse.json({ error: "FC max et FC repos trop proches pour calculer des zones." }, { status: 400 });
   }
-
-  const db = createServiceClient();
   const current = await loadAthleteProfile(db, userId);
   if (!current.stored) {
     return NextResponse.json(
@@ -93,7 +92,7 @@ export async function PUT(req: NextRequest) {
     const { error } = await db.from("users").update(patch).eq("id", userId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     try {
-      reevaluated = await reevaluateCompletedSessionsForUser(userId);
+      reevaluated = await reevaluateCompletedSessionsForUser(db, userId);
     } catch (err) {
       console.warn(`Skipped re-evaluation after profile change for user ${userId}:`, err);
     }

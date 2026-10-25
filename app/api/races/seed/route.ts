@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 
 /** The Paris block: the goal marathon and the two tune-ups that lead to it. */
 const GOAL = {
@@ -27,23 +27,21 @@ const PAST_RESULT = {
 
 /**
  * POST /api/races/seed
- * Body: { userId }
+ * Body: {}
  * One-off and idempotent: adds the Paris goal, its two tune-ups and the
  * Amsterdam half result, each only when no race with that name and date exists
  * for the user. Needs the backward-planner migration in supabase/schema.sql.
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
-
-  const { userId } = body as { userId?: string };
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
-
-  const db = createServiceClient();
 
   const { data: existing, error: existingError } = await db
     .from("races")

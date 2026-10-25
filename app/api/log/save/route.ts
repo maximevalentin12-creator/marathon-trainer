@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
+import type { Db } from "@/lib/supabase";
 import { loadAthleteCalibration } from "@/lib/athlete/profile";
 import {
   applyLiveDowngrade,
@@ -18,7 +19,7 @@ import {
  * failures here shouldn't block saving the entry itself.
  */
 async function downgradeUpcomingSessions(
-  db: ReturnType<typeof createServiceClient>,
+  db: Db,
   userId: string,
   entryDate: string,
   painScore: number,
@@ -108,15 +109,17 @@ async function downgradeUpcomingSessions(
 
 /**
  * POST /api/log/save
- * Body: { userId, entryDate, moodScore, energyScore, painScore,
+ * Body: { entryDate, moodScore, energyScore, painScore,
  *         injuryNotes?, strainNotes?, overallNotes?, sessionId? }
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid body." }, { status: 400 });
 
   const {
-    userId,
     entryDate,
     moodScore,
     energyScore,
@@ -126,7 +129,6 @@ export async function POST(req: NextRequest) {
     overallNotes,
     sessionId,
   } = body as {
-    userId: string;
     entryDate: string;
     moodScore: number;
     energyScore: number;
@@ -137,8 +139,8 @@ export async function POST(req: NextRequest) {
     sessionId?: string;
   };
 
-  if (!userId || !entryDate) {
-    return NextResponse.json({ error: "userId and entryDate are required." }, { status: 400 });
+  if (!entryDate) {
+    return NextResponse.json({ error: "entryDate is required." }, { status: 400 });
   }
 
   if (
@@ -148,8 +150,6 @@ export async function POST(req: NextRequest) {
   ) {
     return NextResponse.json({ error: "Invalid score value." }, { status: 400 });
   }
-
-  const db = createServiceClient();
 
   const { error } = await db.from("subjective_entries").insert({
     user_id: userId,

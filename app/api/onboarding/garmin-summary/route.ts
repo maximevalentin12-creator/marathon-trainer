@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 
 /** Returns the ISO date of the Monday of the week containing `isoDatetime`. */
 function weekMonday(isoDatetime: string): string {
@@ -17,16 +17,13 @@ function avg(nums: number[]): number | null {
 }
 
 /**
- * GET /api/onboarding/garmin-summary?userId=<uuid>
+ * GET /api/onboarding/garmin-summary
  * Returns per-week km, avg pace, avg VO2max for the last 12 weeks.
  */
 export async function GET(req: NextRequest) {
-  const userId = new URL(req.url).searchParams.get("userId");
-  if (!userId) {
-    return NextResponse.json({ error: "userId required" }, { status: 400 });
-  }
-
-  const db = createServiceClient();
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
 
   const cutoff = new Date();
   cutoff.setUTCDate(cutoff.getUTCDate() - 84); // 12 weeks back

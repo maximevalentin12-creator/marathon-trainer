@@ -318,7 +318,9 @@ ALTER TABLE garmin_tokens        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE races                ENABLE ROW LEVEL SECURITY;
 
 -- Each user can only see and modify their own rows.
--- auth.uid() maps to users.id when you use Supabase Auth.
+-- auth.uid() maps to users.id when you use Supabase Auth. The app now signs users in with Supabase Auth and queries
+-- with their session, so these policies are what protects the data — see migrations/2026-10-auth-cutover.sql,
+-- which creates the login with the existing id and re-asserts one policy per table.
 
 CREATE POLICY "own rows" ON users
   FOR ALL USING (auth.uid() = id);

@@ -3,7 +3,7 @@ import { spawn } from "child_process";
 import path from "path";
 import { matchGarminActivitiesForUser, reevaluateCompletedSessionsForUser } from "@/lib/garmin/matchSessions";
 import { raiseHrMaxFromObserved } from "@/lib/athlete/profile";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 
 interface ScriptResult {
   code: number | null;
@@ -13,7 +13,11 @@ interface ScriptResult {
   spawnError?: Error;
 }
 
-/** Runs scripts/sync_garmin.py with the given extra args for this user. */
+/**
+ * Runs scripts/sync_garmin.py with the given extra args for this user. This is where the service-role key is
+ * still handed out: the script bulk-writes activities from its own process, outside any user session. The
+ * route only gets here after requireUser(), and passes the authenticated user's id (never a client-supplied one).
+ */
 function runSyncScript(userId: string, args: string[]): Promise<ScriptResult> {
   return new Promise((resolve) => {
     const scriptPath = path.join(process.cwd(), "scripts", "sync_garmin.py");
@@ -47,7 +51,7 @@ function parseJson(stdout: string): Record<string, unknown> {
 }
 
 /**
- * GET /api/garmin/sync
+ * GET /api/garmin/sync   (signed-in user only)
  * 1. Spawns scripts/sync_garmin.py to import activities.
  * 2. Raises users.hr_max if an activity recorded a higher max HR (never lowers it).
  * 3. Links new activities to planned sessions.
@@ -58,16 +62,10 @@ function parseJson(stdout: string): Record<string, unknown> {
  *    zones moved by step 2).
  * Steps 2-5 are best-effort: a failure there is reported, not fatal.
  */
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get("userId") ?? "";
-
-  if (!userId) {
-    return NextResponse.json(
-      { ok: false, error: "Missing required query param: userId" },
-      { status: 400 }
-    );
-  }
+export async function GET() {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
 
   const sync = await runSyncScript(userId, []);
   if (sync.spawnError) {
@@ -87,7 +85,7 @@ export async function GET(request: Request) {
 
   let hrMax: Record<string, unknown>;
   try {
-    hrMax = await raiseHrMaxFromObserved(createServiceClient(), userId);
+    hrMax = await raiseHrMaxFromObserved(db, userId);
   } catch (err) {
     hrMax = { skipped: true, error: err instanceof Error ? err.message : String(err) };
     console.warn(`Skipped observed hr_max update for user ${userId}:`, hrMax.error);
@@ -96,7 +94,7 @@ export async function GET(request: Request) {
   let completedSessions = 0;
   let completionError: string | null = null;
   try {
-    completedSessions = await matchGarminActivitiesForUser(userId);
+    completedSessions = await matchGarminActivitiesForUser(db, userId);
   } catch (err) {
     completionError = err instanceof Error ? err.message : String(err);
     console.warn(`Skipped session-completion matching for user ${userId}:`, completionError);
@@ -112,7 +110,7 @@ export async function GET(request: Request) {
   let reevaluated = 0;
   let reevaluationError: string | null = null;
   try {
-    reevaluated = await reevaluateCompletedSessionsForUser(userId);
+    reevaluated = await reevaluateCompletedSessionsForUser(db, userId);
   } catch (err) {
     reevaluationError = err instanceof Error ? err.message : String(err);
     console.warn(`Skipped re-evaluation of completed sessions for user ${userId}:`, reevaluationError);

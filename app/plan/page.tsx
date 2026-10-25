@@ -174,20 +174,15 @@ function WeekRow({
 }
 
 export default function PlanPage() {
-  const [userId, setUserId] = useState<string | null | undefined>(undefined);
   const [overview, setOverview] = useState<PlanOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openWeek, setOpenWeek] = useState<string | null>(null);
   const currentRef = useRef<HTMLDivElement | null>(null);
   const scrolled = useRef(false);
 
-  useEffect(() => {
-    setUserId(localStorage.getItem("marathon_user_id"));
-  }, []);
-
-  const load = useCallback(async (uid: string) => {
+  const load = useCallback(async () => {
     setError(null);
-    const res = await fetch(`/api/plan/overview?userId=${uid}`);
+    const res = await fetch("/api/plan/overview");
     const data = await res.json();
     if (!res.ok) {
       setError(data.error ?? "Impossible de charger le plan.");
@@ -198,8 +193,8 @@ export default function PlanPage() {
   }, []);
 
   useEffect(() => {
-    if (userId) load(userId);
-  }, [userId, load]);
+    void load();
+  }, [load]);
 
   // Bring the current week into view once, when the plan first appears.
   useEffect(() => {
@@ -227,18 +222,10 @@ export default function PlanPage() {
 
       <section id="courses" className="mb-8 scroll-mt-4">
         <h2 className="text-base font-semibold mb-3">Mes courses</h2>
-        <RaceSheet onChanged={() => userId && load(userId)} />
+        <RaceSheet onChanged={load} />
       </section>
-      {userId === null && (
-        <p className="text-sm text-gray-600">
-          <a href="/onboarding" className="underline">
-            Termine d&apos;abord la prise en main
-          </a>{" "}
-          pour voir ton plan.
-        </p>
-      )}
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
-      {userId && !overview && !error && <p className="text-sm text-gray-500">Chargement…</p>}
+      {!overview && !error && <p className="text-sm text-gray-500">Chargement…</p>}
 
       {overview && !overview.goal && (
         <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">

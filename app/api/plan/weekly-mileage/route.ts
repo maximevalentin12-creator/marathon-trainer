@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import { toMonday, isoDate, parseIsoDate, addDays, activityModality } from "@/lib/planner";
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -43,7 +43,7 @@ function actualKm(sessions: SessionRow[], metersByActivityId: Map<number, number
 }
 
 /**
- * GET /api/plan/weekly-mileage?userId=<uuid>&weekStart=<YYYY-MM-DD>
+ * GET /api/plan/weekly-mileage?weekStart=<YYYY-MM-DD>
  *
  * Weekly running mileage for the dashboard card, plus a comparison against the
  * previous week. Running sessions only — `modality = 'non_impact'` rows are
@@ -76,11 +76,11 @@ function actualKm(sessions: SessionRow[], metersByActivityId: Map<number, number
  * a Monday, matching GET /api/plan/week.
  */
 export async function GET(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const params = req.nextUrl.searchParams;
-  const userId = params.get("userId");
   const weekStartParam = params.get("weekStart");
-
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
   if (weekStartParam && !ISO_DATE_RE.test(weekStartParam)) {
     return NextResponse.json({ error: "weekStart must be in YYYY-MM-DD format." }, { status: 400 });
   }
@@ -93,8 +93,6 @@ export async function GET(req: NextRequest) {
   const weekStartIso = isoDate(weekStart);
   const prevWeekStartIso = isoDate(addDays(weekStart, -7));
   const weekEndIso = isoDate(addDays(weekStart, 7));
-
-  const db = createServiceClient();
 
   // Both weeks in one round trip — ISO dates sort lexicographically, so the
   // rows split on weekStartIso below.

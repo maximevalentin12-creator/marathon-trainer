@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase";
+import type { Db } from "@/lib/supabase";
 import type { HeartRateZones, Modality } from "@/lib/planner";
 import { loadAthleteZones } from "@/lib/athlete/profile";
 import {
@@ -17,7 +17,7 @@ import {
   type IndoorMismatch,
 } from "@/lib/planner/completion";
 
-type ServiceClient = ReturnType<typeof createServiceClient>;
+type ServiceClient = Db;
 
 interface SessionEvalDetails {
   session_type: string;
@@ -119,8 +119,7 @@ function evaluateSessionAgainstActivity(
  * planned sessions (Prompt 8 spec). Best-effort and idempotent — safe to call
  * after every sync. Returns the number of sessions newly marked completed.
  */
-export async function matchGarminActivitiesForUser(userId: string): Promise<number> {
-  const db = createServiceClient();
+export async function matchGarminActivitiesForUser(db: Db, userId: string): Promise<number> {
 
   const { data: candidateSessionRows, error: sessionsError } = await db
     .from("planned_sessions")
@@ -218,8 +217,7 @@ export async function matchGarminActivitiesForUser(userId: string): Promise<numb
  * forever. Best-effort and idempotent — safe to call after every sync/import.
  * Returns the number of sessions re-evaluated.
  */
-export async function reevaluateCompletedSessionsForUser(userId: string): Promise<number> {
-  const db = createServiceClient();
+export async function reevaluateCompletedSessionsForUser(db: Db, userId: string): Promise<number> {
 
   const { data: sessionRows, error: sessionsError } = await db
     .from("planned_sessions")

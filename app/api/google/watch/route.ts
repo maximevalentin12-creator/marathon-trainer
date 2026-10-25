@@ -1,28 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth/server";
 import { watchUserCalendar } from "@/lib/google/sync";
 
 /**
  * POST /api/google/watch
- * Body: { userId }
- * Registers/renews the Google Calendar push-notification channel for userId.
- * Google channels expire (max ~7 days for calendar events) — call this
- * periodically (e.g. a daily cron) to keep the webhook alive.
+ * Registers/renews the Google Calendar push-notification channel for the signed-in user.
+ * Google channels expire (max ~7 days for calendar events), so this must be called periodically — by a
+ * signed-in client; a scheduled job would need its own credentials (none is wired up).
  */
-export async function POST(req: NextRequest) {
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const { userId } = body as { userId?: string };
-  if (!userId) {
-    return NextResponse.json({ error: "Required: userId." }, { status: 400 });
-  }
+export async function POST() {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
 
   try {
-    const watch = await watchUserCalendar(userId);
+    const watch = await watchUserCalendar(auth.db, auth.userId);
     return NextResponse.json({ ok: true, ...watch });
   } catch (err) {
     return NextResponse.json(

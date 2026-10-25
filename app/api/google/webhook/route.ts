@@ -10,6 +10,11 @@ import { runIncrementalSync } from "@/lib/google/sync";
  * and run an incremental sync to pull the actual change(s) from the API.
  *
  * https://developers.google.com/calendar/api/guides/push
+ *
+ * THE ONE OPEN ROUTE (see middleware.ts): Google sends no Supabase session, so it cannot be a signed-in request.
+ * It authenticates the call itself — the channel id must exist in google_calendar_sync and the
+ * X-Goog-Channel-Token header must equal that row's secret token — and it is the one place (besides the Garmin
+ * sync script) that uses the service-role key, because there is no user session to run RLS against.
  */
 export async function POST(req: NextRequest) {
   const channelId = req.headers.get("x-goog-channel-id");
@@ -34,7 +39,8 @@ export async function POST(req: NextRequest) {
     // Unknown/stale channel (e.g. already stopped) — ack so Google stops retrying.
     return NextResponse.json({ ok: true, ignored: "unknown channel" });
   }
-  if (syncState.channel_token !== channelToken) {
+  // A missing stored token must never match a missing header.
+  if (!syncState.channel_token || syncState.channel_token !== channelToken) {
     return NextResponse.json({ error: "Channel token mismatch." }, { status: 403 });
   }
 
@@ -45,7 +51,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await runIncrementalSync(syncState.user_id);
+    const result = await runIncrementalSync(supabase, syncState.user_id);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     console.error(`Incremental sync failed for user ${syncState.user_id}:`, err);

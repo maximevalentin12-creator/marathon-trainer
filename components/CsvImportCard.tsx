@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 interface ImportResult {
   inserted: number;
@@ -14,19 +14,13 @@ interface ImportResult {
 type Status = "idle" | "uploading" | "done" | "error";
 
 export default function CsvImportCard() {
-  const [userId, setUserId] = useState<string | null | undefined>(undefined);
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    setUserId(localStorage.getItem("marathon_user_id"));
-  }, []);
-
   async function uploadFile(file: File) {
-    if (!userId) return;
     setStatus("uploading");
     setError(null);
     setResult(null);
@@ -34,7 +28,6 @@ export default function CsvImportCard() {
     try {
       const body = new FormData();
       body.append("file", file);
-      body.append("userId", userId);
 
       const res = await fetch("/api/import/csv", { method: "POST", body });
       const json = await res.json();
@@ -56,19 +49,6 @@ export default function CsvImportCard() {
   function handleFiles(files: FileList | null) {
     const file = files?.[0];
     if (file) uploadFile(file);
-  }
-
-  if (userId === undefined) return null;
-
-  if (!userId) {
-    return (
-      <p className="text-xs text-gray-500">
-        <a href="/onboarding" className="underline">
-          Complete onboarding
-        </a>{" "}
-        first to link a CSV import to your profile.
-      </p>
-    );
   }
 
   return (

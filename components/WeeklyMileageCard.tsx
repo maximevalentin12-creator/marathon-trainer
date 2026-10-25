@@ -34,10 +34,8 @@ export default function WeeklyMileageCard() {
   const [data, setData] = useState<WeeklyMileage | null>(null);
 
   const load = useCallback(async () => {
-    const userId = localStorage.getItem("marathon_user_id");
-    if (!userId) return;
     try {
-      const r = await fetch(`/api/plan/weekly-mileage?userId=${userId}`);
+      const r = await fetch("/api/plan/weekly-mileage");
       const json = await r.json();
       if (r.ok && !json.error) setData(json);
     } catch {

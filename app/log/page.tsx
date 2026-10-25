@@ -56,7 +56,6 @@ const textareaCls =
 
 export default function LogPage() {
   const [phase, setPhase] = useState<Phase>("form");
-  const [userId, setUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const today = new Date().toISOString().split("T")[0];
@@ -67,12 +66,6 @@ export default function LogPage() {
   const [injuryNotes, setInjuryNotes] = useState("");
   const [strainNotes, setStrainNotes] = useState("");
   const [overallNotes, setOverallNotes] = useState("");
-
-  useEffect(() => {
-    const id = localStorage.getItem("marathon_user_id");
-    if (!id) setPhase("no-user");
-    else setUserId(id);
-  }, []);
 
   function resetForm() {
     setMood(3);
@@ -88,7 +81,6 @@ export default function LogPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!userId) return;
     setError(null);
     setPhase("saving");
 
@@ -96,7 +88,6 @@ export default function LogPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userId,
         entryDate,
         moodScore: mood,
         energyScore: energy,

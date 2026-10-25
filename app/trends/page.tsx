@@ -209,13 +209,7 @@ export default function TrendsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = localStorage.getItem("marathon_user_id");
-    if (!id) {
-      setData([]);
-      return;
-    }
-
-    fetch(`/api/trends/subjective?userId=${id}`)
+    fetch("/api/trends/subjective")
       .then((r) => r.json())
       .then((d) => setData(d.weeks ?? []))
       .catch(() => setError("Failed to load trends."));

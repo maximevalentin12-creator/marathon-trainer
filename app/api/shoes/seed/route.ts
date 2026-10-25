@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 
 const PLACEHOLDER_IMAGE = "/shoes/placeholder.svg";
 
@@ -62,23 +62,21 @@ const SEED_SHOES = [
 
 /**
  * POST /api/shoes/seed
- * Body: { userId }
+ * Body: {}
  * One-off: inserts the three starting pairs, but only when this user has no
  * shoes yet — safe to call repeatedly (e.g. an accidental double-click) without
  * duplicating rows.
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
-
-  const { userId } = body as { userId?: string };
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
-
-  const db = createServiceClient();
 
   const { count, error: countError } = await db
     .from("shoes")

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -16,21 +16,20 @@ function monthRange(month: string): { start: string; end: string } {
 }
 
 /**
- * GET /api/reports/monthly-counts?userId=<uuid>&month=YYYY-MM
+ * GET /api/reports/monthly-counts?month=YYYY-MM
  * Completed/skipped planned_sessions counts for a calendar month — computed
  * live from planned_sessions, no running total is stored. Used by the
  * dashboard's monthly counter; `month` defaults to the current month.
  */
 export async function GET(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const params = req.nextUrl.searchParams;
-  const userId = params.get("userId");
   const month = params.get("month") ?? currentMonth();
-
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
   if (!MONTH_RE.test(month)) return NextResponse.json({ error: "month must be in YYYY-MM format." }, { status: 400 });
 
   const { start, end } = monthRange(month);
-  const db = createServiceClient();
 
   const { data: sessions, error } = await db
     .from("planned_sessions")

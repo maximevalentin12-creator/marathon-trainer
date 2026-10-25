@@ -153,8 +153,6 @@ export default function OnboardingPage() {
   const router = useRouter();
 
   const [phase, setPhase] = useState<Phase>("email");
-  const [email, setEmail] = useState("");
-  const [userId, setUserId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Form state
@@ -173,10 +171,10 @@ export default function OnboardingPage() {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  async function fetchSummary(uid: string) {
+  async function fetchSummary() {
     setSummary("loading");
     try {
-      const r = await fetch(`/api/onboarding/garmin-summary?userId=${uid}`);
+      const r = await fetch("/api/onboarding/garmin-summary");
       const data = await r.json();
       setSummary(data.weeks ? data : null);
     } catch {
@@ -186,24 +184,9 @@ export default function OnboardingPage() {
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
-  async function handleEmailSubmit(e: React.FormEvent) {
+  async function handleStart(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim()) return;
     setError(null);
-
-    // 1. Find or create user
-    const r = await fetch("/api/onboarding/user", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    const { userId: uid, error: apiErr } = await r.json();
-    if (apiErr || !uid) {
-      setError(apiErr ?? "Could not create account.");
-      return;
-    }
-    setUserId(uid);
-    localStorage.setItem("marathon_user_id", uid);
     setPhase("syncing");
 
     // 2. Trigger Garmin sync in background — abortable on skip
@@ -211,30 +194,25 @@ export default function OnboardingPage() {
     syncAbortRef.current = controller;
 
     try {
-      await fetch(`/api/garmin/sync?userId=${uid}`, { signal: controller.signal });
+      await fetch("/api/garmin/sync", { signal: controller.signal });
     } catch {
       // network error or aborted — either way fall through
     }
 
     if (!controller.signal.aborted) {
-      await fetchSummary(uid);
+      await fetchSummary();
       setPhase("form");
     }
   }
 
   function handleSkipSync() {
     syncAbortRef.current?.abort();
-    const uid = userId;
-    if (uid) void fetchSummary(uid); // non-blocking; form shows "loading" briefly
+    void fetchSummary(); // non-blocking; form shows "loading" briefly
     setPhase("form");
   }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!userId) {
-      setError("Missing profile — restart onboarding.");
-      return;
-    }
     if (raceDate && new Date(raceDate) <= new Date()) {
       setError("Race date must be in the future.");
       return;
@@ -263,7 +241,6 @@ export default function OnboardingPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userId,
         raceDate: raceDate || null,
         runsPerWeek,
         pb5k: pb5k || null,
@@ -309,26 +286,15 @@ export default function OnboardingPage() {
       <main className="max-w-xl mx-auto px-4 py-12">
         <h1 className="text-xl font-semibold mb-1">Marathon Trainer</h1>
         <p className="text-sm text-gray-500 mb-8">
-          Let&apos;s set up your training profile.
+          On prépare ton profil d&apos;entraînement.
         </p>
-        <form onSubmit={handleEmailSubmit} className="space-y-4 max-w-sm">
-          <Field label="Your email">
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className={inputCls}
-              autoFocus
-            />
-          </Field>
+        <form onSubmit={handleStart} className="space-y-4 max-w-sm">
           {error && <p className="text-xs text-red-500">{error}</p>}
           <button
             type="submit"
             className="px-4 py-2 text-sm font-medium text-white bg-gray-800 rounded hover:bg-gray-700 transition-colors"
           >
-            Continue →
+            Importer mon historique Garmin →
           </button>
         </form>
       </main>

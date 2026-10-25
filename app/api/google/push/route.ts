@@ -1,26 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { requireUser } from "@/lib/auth/server";
 import { pushUserSessions } from "@/lib/google/sync";
 
 /**
  * POST /api/google/push
- * Body: { userId }
- * Pushes any new/changed planned_sessions rows for userId to Google Calendar.
+ * Pushes the signed-in user's new/changed planned_sessions rows to Google Calendar.
  */
-export async function POST(req: NextRequest) {
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const { userId } = body as { userId?: string };
-  if (!userId) {
-    return NextResponse.json({ error: "Required: userId." }, { status: 400 });
-  }
+export async function POST() {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
 
   try {
-    const result = await pushUserSessions(userId);
+    const result = await pushUserSessions(auth.db, auth.userId);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     return NextResponse.json(

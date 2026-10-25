@@ -107,19 +107,14 @@ const chip = (on: boolean) =>
 
 /** The user's races: the goal with its tune-ups underneath, past races to correct, and the add/edit sheet. */
 export default function RaceSheet({ onChanged }: { onChanged?: () => void }) {
-  const [userId, setUserId] = useState<string | null | undefined>(undefined);
   const [races, setRaces] = useState<RaceRow[] | null>(null);
   const [editing, setEditing] = useState<"new" | string | null>(null);
   const [form, setForm] = useState<FormValues>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setUserId(localStorage.getItem("marathon_user_id"));
-  }, []);
-
-  const load = useCallback(async (uid: string) => {
-    const res = await fetch(`/api/races?userId=${uid}`);
+  const load = useCallback(async () => {
+    const res = await fetch("/api/races");
     const data = await res.json();
     if (!res.ok) {
       setError(data.error ?? "Impossible de charger les courses.");
@@ -130,20 +125,9 @@ export default function RaceSheet({ onChanged }: { onChanged?: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (userId) load(userId);
-  }, [userId, load]);
+    void load();
+  }, [load]);
 
-  if (userId === undefined) return null;
-  if (!userId) {
-    return (
-      <p className="text-sm text-gray-600">
-        <a href="/onboarding" className="underline">
-          Termine d&apos;abord la prise en main
-        </a>{" "}
-        pour ajouter une course.
-      </p>
-    );
-  }
   if (races === null) return <p className="text-sm text-gray-500">Chargement…</p>;
 
   const today = todayIso();
@@ -175,7 +159,7 @@ export default function RaceSheet({ onChanged }: { onChanged?: () => void }) {
   }
 
   async function save() {
-    if (!userId || !editing) return;
+    if (!editing) return;
     const distanceKm = form.preset === "custom" ? Number(form.customKm.replace(",", ".")) : Number(form.preset);
     if (!form.name.trim()) return setError("Donne un nom à la course.");
     if (!form.raceDate) return setError("Choisis la date de la course.");
@@ -198,7 +182,6 @@ export default function RaceSheet({ onChanged }: { onChanged?: () => void }) {
       method: editing === "new" ? "POST" : "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        userId,
         name: form.name,
         raceDate: form.raceDate,
         distanceKm,
@@ -213,23 +196,21 @@ export default function RaceSheet({ onChanged }: { onChanged?: () => void }) {
     setBusy(false);
     if (!res.ok) return setError(data.error ?? "Enregistrement impossible.");
     setEditing(null);
-    await load(userId);
+    await load();
     onChanged?.();
   }
 
   async function remove(race: RaceRow) {
-    if (!userId || !confirm(`Supprimer « ${race.name} » ?`)) return;
+    if (!confirm(`Supprimer « ${race.name} » ?`)) return;
     setBusy(true);
     setError(null);
     const res = await fetch(`/api/races/${race.id}`, {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
     });
     const data = await res.json();
     setBusy(false);
     if (!res.ok) return setError(data.error ?? "Suppression impossible.");
-    await load(userId);
+    await load();
     onChanged?.();
   }
 

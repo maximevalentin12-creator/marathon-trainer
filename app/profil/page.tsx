@@ -60,7 +60,6 @@ function ZonesTable({ zones }: { zones: Record<EffortZoneId, EffortZone> }) {
 }
 
 export default function ProfilPage() {
-  const [userId, setUserId] = useState<string | null>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "no-user">("loading");
   const [data, setData] = useState<ProfileResponse | null>(null);
   const [hrMax, setHrMax] = useState("");
@@ -69,9 +68,9 @@ export default function ProfilPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async () => {
     try {
-      const r = await fetch(`/api/profile?userId=${encodeURIComponent(id)}`);
+      const r = await fetch("/api/profile");
       const json = await r.json();
       if (!r.ok) throw new Error(json.error ?? "Erreur");
       setData(json);
@@ -83,13 +82,7 @@ export default function ProfilPage() {
   }, []);
 
   useEffect(() => {
-    const id = localStorage.getItem("marathon_user_id");
-    if (!id) {
-      setPhase("no-user");
-      return;
-    }
-    setUserId(id);
-    void load(id).then(() => setPhase("ready"));
+    void load().then(() => setPhase("ready"));
   }, [load]);
 
   const maxNum = Number(hrMax);
@@ -106,7 +99,7 @@ export default function ProfilPage() {
   const previewZones = inputsValid ? heartRateZones(maxNum, restNum) : data?.zones;
 
   async function handleSave() {
-    if (!userId || !inputsValid) return;
+    if (!inputsValid) return;
     setSaving(true);
     setMessage(null);
     setError(null);
@@ -114,7 +107,7 @@ export default function ProfilPage() {
       const r = await fetch("/api/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, hrMax: maxNum, hrRest: restNum }),
+        body: JSON.stringify({ hrMax: maxNum, hrRest: restNum }),
       });
       const json = await r.json();
       if (!r.ok) throw new Error(json.error ?? "Erreur");
@@ -123,7 +116,7 @@ export default function ProfilPage() {
           ? `Enregistré (test terrain). ${json.reevaluated} séance(s) réalisée(s) réévaluée(s) avec les nouvelles zones.`
           : "Aucun changement."
       );
-      await load(userId);
+      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur à l'enregistrement.");
     } finally {

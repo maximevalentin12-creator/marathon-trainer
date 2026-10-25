@@ -1,19 +1,28 @@
-import { NextRequest, NextResponse } from "next/server";
-import { buildAuthUrl } from "@/lib/google/client";
+import { NextResponse } from "next/server";
+import { randomBytes } from "crypto";
+import { requireUser } from "@/lib/auth/server";
+import { buildAuthUrl, GOOGLE_STATE_COOKIE } from "@/lib/google/client";
 
 /**
- * GET /api/google/auth?userId=<uuid>
- * Redirects to Google's OAuth consent screen. On success Google redirects
- * back to GOOGLE_REDIRECT_URI (/api/google/callback) with a code + state.
+ * GET /api/google/auth
+ * Redirects the signed-in user to Google's OAuth consent screen. `state` is a one-time random value, kept in an
+ * httpOnly cookie and checked by /api/google/callback — no user id travels through Google.
  */
-export async function GET(req: NextRequest) {
-  const userId = req.nextUrl.searchParams.get("userId");
-  if (!userId) {
-    return NextResponse.json({ error: "Required query param: userId." }, { status: 400 });
-  }
+export async function GET() {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
 
   try {
-    return NextResponse.redirect(buildAuthUrl(userId));
+    const state = randomBytes(24).toString("hex");
+    const response = NextResponse.redirect(buildAuthUrl(state));
+    response.cookies.set(GOOGLE_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/api/google",
+      maxAge: 600,
+    });
+    return response;
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to build Google auth URL." },

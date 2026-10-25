@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 
 /** ISO Monday of the week containing dateStr (DATE string, no time). */
 function weekMonday(dateStr: string): string {
@@ -16,17 +16,15 @@ function safeAvg(nums: number[]): number | null {
 }
 
 /**
- * GET /api/trends/subjective?userId=<uuid>&weeks=12
+ * GET /api/trends/subjective?weeks=12
  * Returns per-week averages for pain, energy, and mood.
  */
 export async function GET(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const params = new URL(req.url).searchParams;
-  const userId = params.get("userId");
   const lookbackWeeks = Math.min(parseInt(params.get("weeks") ?? "12", 10), 52);
-
-  if (!userId) return NextResponse.json({ error: "userId required" }, { status: 400 });
-
-  const db = createServiceClient();
 
   const cutoff = new Date();
   cutoff.setUTCDate(cutoff.getUTCDate() - lookbackWeeks * 7);

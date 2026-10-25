@@ -20,10 +20,8 @@ export default function MonthlyCounter() {
   const [counts, setCounts] = useState<Counts | null>(null);
 
   const load = useCallback(async () => {
-    const userId = localStorage.getItem("marathon_user_id");
-    if (!userId) return;
     try {
-      const r = await fetch(`/api/reports/monthly-counts?userId=${userId}`);
+      const r = await fetch("/api/reports/monthly-counts");
       const data = await r.json();
       if (r.ok && !data.error) setCounts({ completed: data.completed, skipped: data.skipped });
     } catch {

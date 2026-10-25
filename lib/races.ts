@@ -1,7 +1,7 @@
 // The user's races (races table). Stored for the future race-based planner;
 // for now only the temporary race mode reads them (lib/planner/race.ts).
 
-import type { createServiceClient } from "@/lib/supabase";
+import type { Db } from "@/lib/supabase";
 import {
   addDays,
   isoDate,
@@ -12,7 +12,7 @@ import {
   type SubjectiveSignal,
 } from "@/lib/planner";
 
-type ServiceClient = ReturnType<typeof createServiceClient>;
+type ServiceClient = Db;
 
 /** Postgres "undefined_table" / PostgREST "table not in schema cache" — the races migration hasn't run yet. */
 const MISSING_TABLE_CODES = new Set(["42P01", "PGRST205"]);

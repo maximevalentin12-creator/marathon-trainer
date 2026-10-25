@@ -9,7 +9,7 @@
 // - observed only ever RAISES hr_max (raiseHrMaxFromObserved): a recorded HR
 //   above the current max proves the max is higher; a lower one proves nothing.
 
-import type { createServiceClient } from "@/lib/supabase";
+import type { Db } from "@/lib/supabase";
 import {
   DEFAULT_HR_MAX,
   DEFAULT_HR_REST,
@@ -20,7 +20,7 @@ import {
 import { EASY_PACE_WINDOW_DAYS, estimateEasyPace, type EasyPaceEstimate } from "@/lib/planner/easyPace";
 import type { AthleteCalibration, SessionKind } from "@/lib/planner/types";
 
-type ServiceClient = ReturnType<typeof createServiceClient>;
+type ServiceClient = Db;
 
 export const HR_SOURCES = ["garmin_settings", "field_test", "observed"] as const;
 export type HrSource = (typeof HR_SOURCES)[number];

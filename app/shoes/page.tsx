@@ -331,7 +331,6 @@ function WearWithNote({ totalKm }: { totalKm: number }) {
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default function ShoesPage() {
-  const [userId, setUserId] = useState<string | null>(null);
   const [shoes, setShoes] = useState<Shoe[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -339,10 +338,10 @@ export default function ShoesPage() {
   const [busy, setBusy] = useState(false);
   const [seeding, setSeeding] = useState(false);
 
-  const load = useCallback(async (uid: string) => {
+  const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await fetch(`/api/shoes?userId=${uid}`);
+      const r = await fetch("/api/shoes");
       const data = await r.json();
       if (!r.ok || data.error) {
         setError(data.error ?? "Impossible de charger les paires.");
@@ -355,15 +354,12 @@ export default function ShoesPage() {
   }, []);
 
   useEffect(() => {
-    const id = localStorage.getItem("marathon_user_id");
-    setUserId(id);
-    if (id) void load(id);
+    void load();
   }, [load]);
 
   const selected = shoes?.find((s) => s.id === selectedId) ?? null;
 
   async function handleCreate(values: ShoeFormValues) {
-    if (!userId) return;
     setBusy(true);
     setError(null);
     try {
@@ -371,7 +367,6 @@ export default function ShoesPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId,
           name: values.name.trim(),
           brand: values.brand.trim() || null,
           model: values.model.trim() || null,
@@ -391,7 +386,7 @@ export default function ShoesPage() {
         return;
       }
       setShowAdd(false);
-      await load(userId);
+      await load();
     } catch {
       setError("La création a échoué.");
     } finally {
@@ -400,7 +395,6 @@ export default function ShoesPage() {
   }
 
   async function handleUpdate(shoeId: string, values: ShoeFormValues) {
-    if (!userId) return;
     setBusy(true);
     setError(null);
     try {
@@ -408,7 +402,6 @@ export default function ShoesPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId,
           name: values.name.trim(),
           brand: values.brand.trim() || null,
           model: values.model.trim() || null,
@@ -427,7 +420,7 @@ export default function ShoesPage() {
         setError(data.error ?? "La mise à jour a échoué.");
         return;
       }
-      await load(userId);
+      await load();
     } catch {
       setError("La mise à jour a échoué.");
     } finally {
@@ -436,15 +429,14 @@ export default function ShoesPage() {
   }
 
   async function handleToggleRetired(shoe: Shoe) {
-    if (!userId) return;
     setBusy(true);
     try {
       await fetch(`/api/shoes/${shoe.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, retired: !shoe.retired }),
+        body: JSON.stringify({ retired: !shoe.retired }),
       });
-      await load(userId);
+      await load();
     } catch {
       setError("La mise à jour a échoué.");
     } finally {
@@ -453,13 +445,10 @@ export default function ShoesPage() {
   }
 
   async function handleDelete(shoeId: string) {
-    if (!userId) return;
     setBusy(true);
     try {
       const r = await fetch(`/api/shoes/${shoeId}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
       });
       const data = await r.json();
       if (!r.ok || data.error) {
@@ -467,7 +456,7 @@ export default function ShoesPage() {
         return;
       }
       setSelectedId(null);
-      await load(userId);
+      await load();
     } catch {
       setError("La suppression a échoué.");
     } finally {
@@ -476,39 +465,25 @@ export default function ShoesPage() {
   }
 
   async function handleSeed() {
-    if (!userId) return;
     setSeeding(true);
     setError(null);
     try {
       const r = await fetch("/api/shoes/seed", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({}),
       });
       const data = await r.json();
       if (!r.ok || data.error) {
         setError(data.error ?? "L'ajout a échoué.");
         return;
       }
-      await load(userId);
+      await load();
     } catch {
       setError("L'ajout a échoué.");
     } finally {
       setSeeding(false);
     }
-  }
-
-  if (!userId) {
-    return (
-      <main className="max-w-3xl mx-auto px-4 py-12">
-        <p className="text-sm text-gray-500">
-          <a href="/onboarding" className="underline">
-            Complète ton profil
-          </a>{" "}
-          pour gérer tes paires.
-        </p>
-      </main>
-    );
   }
 
   return (

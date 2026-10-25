@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import {
   toMonday,
   isoDate,
@@ -92,7 +92,7 @@ function activityDate(a: ActivityRow): string {
 }
 
 /**
- * GET /api/history?userId=<uuid>&before=<YYYY-MM-DD>&weeks=<n>
+ * GET /api/history?before=<YYYY-MM-DD>&weeks=<n>
  *
  * One page of the training history for /historique, newest week first.
  * Covers the `weeks` weeks (default 6, max 26) ending just before `before` —
@@ -111,12 +111,12 @@ function activityDate(a: ActivityRow): string {
  * straight to the next week that has data (null when there is none).
  */
 export async function GET(req: NextRequest) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const params = req.nextUrl.searchParams;
-  const userId = params.get("userId");
   const beforeParam = params.get("before");
   const weeksParam = params.get("weeks");
-
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
   if (beforeParam && !ISO_DATE_RE.test(beforeParam)) {
     return NextResponse.json({ error: "before must be in YYYY-MM-DD format." }, { status: 400 });
   }
@@ -134,8 +134,6 @@ export async function GET(req: NextRequest) {
   const rangeStart = addDays(before, -7 * weeks);
   const rangeStartIso = isoDate(rangeStart);
   const rangeEndIso = isoDate(before);
-
-  const db = createServiceClient();
 
   const [plannedRes, activitiesRes] = await Promise.all([
     db

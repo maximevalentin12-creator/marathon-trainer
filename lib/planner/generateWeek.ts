@@ -4,7 +4,7 @@
 // re-runs this to let the planner re-place it). Pure placement logic lives
 // in lib/planner/rules.ts.
 
-import { createServiceClient } from "@/lib/supabase";
+import type { Db } from "@/lib/supabase";
 import { pushUserSessions } from "@/lib/google/sync";
 import { loadAthleteCalibration } from "@/lib/athlete/profile";
 import { loadRaces, attachRacePainWarnings } from "@/lib/races";
@@ -40,6 +40,8 @@ export const DAY_OVERRIDE_DROPPED_NOTICE =
   "Jour déplacé — le jour choisi n'est plus disponible cette semaine.";
 
 export interface RegenerateWeekParams {
+  /** The signed-in user's client: Row Level Security applies to everything the generation reads and writes. */
+  db: Db;
   userId: string;
   weekStart: Date; // Monday
   runsPerWeek: number;
@@ -66,7 +68,7 @@ export interface RegenerateWeekResult {
 
 export type RegenerateWeekError = { error: string; status: number };
 
-type ServiceClient = ReturnType<typeof createServiceClient>;
+type ServiceClient = Db;
 
 /**
  * Adds `actual` (the linked Garmin activity's distance/duration/pace) to each
@@ -130,11 +132,9 @@ function todayIsoDate(): string {
 export async function regenerateWeekSessions(
   params: RegenerateWeekParams
 ): Promise<RegenerateWeekResult | RegenerateWeekError> {
-  const { userId, weekStart, runsPerWeek, indoorRuns, nonImpactSessions, nonImpactMachines, availableDays } = params;
+  const { db, userId, weekStart, runsPerWeek, indoorRuns, nonImpactSessions, nonImpactMachines, availableDays } = params;
   const weekStartIso = isoDate(weekStart);
   const weekEndIso = isoDate(addDays(weekStart, 7));
-
-  const db = createServiceClient();
 
   const { data: user, error: userError } = await db
     .from("users")
@@ -478,7 +478,7 @@ export async function regenerateWeekSessions(
 
   let googleCalendar: Awaited<ReturnType<typeof pushUserSessions>> | { skipped: true } = { skipped: true };
   try {
-    googleCalendar = await pushUserSessions(userId);
+    googleCalendar = await pushUserSessions(db, userId);
   } catch (err) {
     console.warn(`Skipped Google Calendar push for user ${userId}:`, err instanceof Error ? err.message : err);
   }

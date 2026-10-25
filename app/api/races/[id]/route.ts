@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth/server";
 import { RACE_RESPONSE_COLUMNS, validateRaceFields } from "@/lib/races";
 
 /**
  * PATCH /api/races/:id
- * Body: { userId, ...any subset of name/raceDate/distanceKm/kind/parentRaceId/bibStatus/targetTimeS/resultTimeS }
+ * Body: { ...any subset of name/raceDate/distanceKm/kind/parentRaceId/bibStatus/targetTimeS/resultTimeS }
  */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -14,13 +17,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { userId } = body as { userId?: string };
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
-
   const fields = validateRaceFields(body, false);
   if ("error" in fields) return NextResponse.json({ error: fields.error }, { status: 400 });
-
-  const db = createServiceClient();
   const { data, error } = await db
     .from("races")
     .update(fields.values)
@@ -36,22 +34,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 /**
  * DELETE /api/races/:id
- * Body: { userId }
  * Sessions already planned from it (the race session included) stay until
  * their week is regenerated.
  */
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const { userId } = body as { userId?: string };
-  if (!userId) return NextResponse.json({ error: "userId is required." }, { status: 400 });
-
-  const db = createServiceClient();
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const { userId, db } = auth;
   const { error } = await db.from("races").delete().eq("id", params.id).eq("user_id", userId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
