@@ -61,18 +61,17 @@ async function main() {
   console.log(`Long-run anchor: ${plan.longRunAnchorMin} min (longest non-race run of the last 12 weeks)`);
   console.log(`Easy pace: ${Math.floor(easy / 60)}:${String(Math.round(easy % 60)).padStart(2, "0")}/km — peak week: ${plan.peakKm} km`);
   if (plan.warnings.length) console.log("Warnings:\n - " + plan.warnings.join("\n - "));
-  console.log("\nwk  dates          n  phase        km  long  long%  key           races");
+  console.log("\nwk  dates          n  phase        km  long  long%  MP km  key           races");
   const md = (d: Date) => isoDate(d).slice(5);
   plan.weeks.forEach((w, i) => {
     const pct = w.longRunMin > 0 && w.targetKm > 0 ? Math.round(((w.longRunMin * 60) / easy / w.targetKm) * 100) + "%" : "-";
     const tags = [
       w.raceIds.map((id) => names.get(id) ?? id).join(", "),
       w.isDeload ? "deload" : "",
-      w.longRunMpBlock ? `MP ${w.longRunMpBlock.reps}x${w.longRunMpBlock.kmEach}` : "",
     ].filter(Boolean);
     console.log(
       `${String(i).padStart(2)}  ${md(w.weekStart)}..${md(addDays(w.weekStart, 6))} ${String(w.weeksToRace).padStart(2)}  ` +
-        `${w.phase.padEnd(12)} ${String(w.targetKm).padStart(3)} ${String(w.longRunMin).padStart(5)} ${pct.padStart(6)}  ` +
+        `${w.phase.padEnd(12)} ${String(w.targetKm).padStart(3)} ${String(w.longRunMin).padStart(5)} ${pct.padStart(6)}  ${String(w.longRunMpBlock ? w.longRunMpBlock.reps * w.longRunMpBlock.kmEach : "-").padStart(5)}  ` +
         `${w.keySession.padEnd(13)} ${tags.join(" · ")}`
     );
   });

@@ -179,7 +179,7 @@ export interface RacePlanWeekInput {
     | "strides";
   isDeload: boolean;
   /** MP blocks inside the long run (marathon specific phase). */
-  longRunMpBlock: { reps: number; kmEach: number } | null;
+  longRunMpBlock: { reps: number; kmEach: number; finish?: boolean } | null;
   /** First day (0 = Monday) quality may land on; the days before are easy after a race. */
   qualityFromDay: number;
   /** Last day (0 = Monday) quality may land on — before the 3-day pre-race window of a race early next week. */

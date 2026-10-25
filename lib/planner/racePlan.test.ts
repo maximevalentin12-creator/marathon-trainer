@@ -21,6 +21,7 @@ interface Generated {
   /** A long run with marathon-pace blocks counts as quality. */
   isQuality: boolean;
   label: string;
+  minutes: number;
 }
 
 const run = (date: string, km: number, paceSec = 375) => ({
@@ -108,6 +109,7 @@ function generate(allRaces: Race[], today: string, runsPerWeek = 4): Generated[]
         date: s.plannedDate,
         kind: s.kind,
         label: s.label,
+        minutes: s.targetDurationMinutes,
         isQuality: s.kind === "threshold" || s.kind === "vo2max" || (s.kind === "long" && s.variant === "mp_blocks"),
       });
     }
@@ -366,6 +368,86 @@ describe("continuous mode", () => {
         assert.notEqual(Math.abs(dayDiff(q.plannedDate, long.plannedDate)), 1, `${runs} runs: quality next to the long run`);
       }
     }
+  });
+});
+
+describe("floors", () => {
+  const plan = buildRacePlan(planGoal, planTuneUps, planHistory());
+  it("keeps long runs at 60 / 90 / 120 min or more outside tune-up, recovery, taper and race weeks", () => {
+    for (const w of plan.weeks) {
+      if (!["base", "development", "specific"].includes(w.phase) || w.raceIds.length > 0 || w.longRunMin === 0) continue;
+      const floor = RACE_PLAN_CONFIG.longRunFloorMin[w.phase as "base" | "development" | "specific"];
+      assert.ok(w.longRunMin >= floor, `${w.weekStart.toISOString().slice(0, 10)} (${w.phase}): ${w.longRunMin} < ${floor}`);
+    }
+  });
+  it("warns instead of cutting when a floor pushes a week past its km", () => {
+    const small = buildRacePlan(planGoal, planTuneUps, {
+      ...planHistory(),
+      activities: [run("2026-10-06", 5), run("2026-10-13", 5), run("2026-09-29", 5), run("2026-09-22", 5)],
+    });
+    assert.ok(small.warnings.some((x) => x.includes("planchers")));
+  });
+  it("never plans an easy run under 30 minutes", () => {
+    const sessions = generate(races("2027-04-03", []), "2026-10-29");
+    for (const s of sessions.filter((x) => x.kind === "easy")) {
+      assert.ok(s.minutes >= 30 || s.label.includes("rappels") || s.label.includes("adaptée"), `${s.label}: ${s.minutes} min`);
+    }
+  });
+});
+
+describe("marathon pace in the long run", () => {
+  const plan = buildRacePlan(planGoal, planTuneUps, { ...planHistory(), marathonPaceSecPerKm: 344 });
+  const mp = (n: number) => {
+    const b = plan.weeks.find((w) => w.weeksToRace === n)!.longRunMpBlock;
+    return b ? b.reps * b.kmEach : 0;
+  };
+  it("finishes the development long runs with 3 → 5 → 6 km from 10 weeks out, none on deload weeks", () => {
+    assert.deepEqual([mp(10), mp(9), mp(8), mp(7)], [3, 5, 0, 6]);
+    assert.equal(mp(11), 0);
+    assert.equal(plan.weeks.find((w) => w.weeksToRace === 10)!.longRunMpBlock!.finish, true);
+  });
+  it("keeps the specific blocks: 12 km at -5, 14 km at -2", () => {
+    assert.equal(mp(5), 12);
+    assert.equal(mp(2), 14);
+  });
+  it("shrinks a block that doesn't fit (MP km × pace + 30 min easy ≤ long run) and warns", () => {
+    const slow = buildRacePlan(planGoal, planTuneUps, { ...planHistory(), marathonPaceSecPerKm: 600 });
+    for (const w of slow.weeks) {
+      const b = w.longRunMpBlock;
+      if (b) assert.ok(((b.reps * b.kmEach * 600) / 60) + 30 <= w.longRunMin, `${w.weekStart.toISOString().slice(0, 10)}`);
+    }
+    assert.ok(slow.warnings.some((x) => x.includes("ne tiennent pas")));
+  });
+  it("shrinks it in the session too", () => {
+    const week = buildWeekPlan({
+      userId: "u",
+      weekStartDate: parseIsoDate("2027-03-15"),
+      runsPerWeek: 4,
+      indoorRuns: 0,
+      nonImpactSessions: 0,
+      nonImpactMachines: [],
+      cycleWeekNumber: 1,
+      phase: "specifique",
+      qualityLevel: 3,
+      longRunMinutes: 60,
+      calibration: { zones, paceReferenceSecPerKm: 306, easyPaceSecPerKm: 375, marathonPaceSecPerKm: 420 },
+      subjectiveEntries: [],
+      availableDays: [0, 1, 2, 3, 4, 5, 6],
+      racePlan: {
+        phase: "specific",
+        targetKm: 50,
+        longRunMin: 100,
+        keySession: "strides",
+        isDeload: false,
+        longRunMpBlock: { reps: 2, kmEach: 7 },
+        qualityFromDay: 0,
+        qualityLevel: 3,
+      },
+    });
+    const long = week.sessions.find((x) => x.kind === "long")!;
+    const mpMin = long.steps.filter((x) => x.zoneLabel === "Allure marathon").reduce((sum, x) => sum + (x.durationMinutes ?? 0), 0);
+    assert.ok(mpMin + 30 <= 100, `${mpMin} min of MP in a 100 min run`);
+    assert.match(long.whyNote, /Bloc réduit/);
   });
 });
 

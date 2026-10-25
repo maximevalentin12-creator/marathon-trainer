@@ -118,19 +118,20 @@ export function resolveRacePlanWeek(params: RacePlanWeekParams): ResolvedRacePla
       .sort((a, b) => b.raceDate.getTime() - a.raceDate.getTime())
       .map((r) => ({ raceDate: r.raceDate, distanceKm: r.distanceKm }))[0] ?? null;
 
+  const longestRunKm = activities.reduce((max, a) => Math.max(max, a.distanceKm), 0);
+  const result = latestRaceResult(races, today);
+  const paces = result ? trainingPacesFromRace(result, longestRunKm) : null;
+
   const plan = buildRacePlan(toPlanRace(goal), tuneUps.map(toPlanRace), {
     today,
     activities,
     flaggedDates,
     lastRace,
     easyPaceSecPerKm,
+    marathonPaceSecPerKm: paces?.marathonPaceSecPerKm,
   });
   const week = planWeekFor(plan, weekStart);
   if (!week) return null;
-
-  const longestRunKm = activities.reduce((max, a) => Math.max(max, a.distanceKm), 0);
-  const result = latestRaceResult(races, today);
-  const paces = result ? trainingPacesFromRace(result, longestRunKm) : null;
 
   // A race early next week closes the week's tail: no quality in the 3 days before it, no long run in the 4 before.
   const nextWeekRaces = [goal, ...tuneUps].filter(

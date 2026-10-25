@@ -19,6 +19,7 @@ import type {
   WeekPlan,
 } from "./types";
 import { hrHint, type HeartRateZones } from "./zones";
+import { RACE_PLAN_CONFIG } from "./config";
 import { addDays } from "./dates";
 import { decideDowngrade, findApplicableSignal, shouldAddStrides } from "./subjective";
 import {
@@ -585,12 +586,17 @@ function buildRaceSession(
 
 // ─── Race-plan sessions (backward race planner, racePlan.ts) ───────────────
 
-/** Long run with marathon-pace blocks: easy warm-up, `reps` × `kmEach` km at MP with 1 km easy between, easy cool-down. */
+/**
+ * Long run with marathon-pace work. Specific phase: easy warm-up, `reps` × `kmEach` km at MP with 1 km easy
+ * between, easy cool-down. Development phase (`finish`): easy running, then one MP segment closing the run.
+ * MP km × MP pace + 30 min easy must fit in the run — the work shrinks until it does (and the note says so);
+ * with no room for even 2 km it is a plain long run.
+ */
 function buildMpLongSession(
   userId: string,
   plannedDate: Date,
   minutes: number,
-  block: { reps: number; kmEach: number },
+  block: { reps: number; kmEach: number; finish?: boolean },
   indoor: boolean,
   cal: AthleteCalibration,
   mpPace: number
@@ -598,41 +604,69 @@ function buildMpLongSession(
   const easyPace = cal.easyPaceSecPerKm;
   const recoveryKm = 1;
   const cooldownMin = 10;
-  // The MP work never takes more than 60 % of the run: shrink the blocks if the run is short.
-  let kmEach = block.kmEach;
-  const workMinutes = (km: number) => (km * block.reps * mpPace) / 60 + ((block.reps - 1) * recoveryKm * easyPace) / 60;
-  while (kmEach > 2 && workMinutes(kmEach) > minutes * 0.6) kmEach--;
-  const warmupMin = Math.max(15, Math.round(minutes - workMinutes(kmEach) - cooldownMin));
+  const minEasy = RACE_PLAN_CONFIG.mpBlock.minEasyMin;
+  const reps = block.finish ? 1 : block.reps;
+  const workMinutes = (km: number) => (km * reps * mpPace) / 60;
 
-  const steps: SessionStep[] = [{ ...warmupStep(warmupMin, indoor, cal.zones), label: "Échauffement facile" }];
-  for (let r = 1; r <= block.reps; r++) {
+  let kmEach = block.kmEach;
+  while (kmEach >= 2 && workMinutes(kmEach) + minEasy > minutes) kmEach--;
+  if (kmEach < 2) {
+    return buildLongSession(userId, plannedDate, minutes, "continuous", indoor, cal, null, null);
+  }
+  const shrunk = kmEach < block.kmEach;
+  const mpKm = kmEach * reps;
+
+  const steps: SessionStep[] = [];
+  if (block.finish) {
+    const easyMin = Math.round(minutes - workMinutes(kmEach));
     steps.push({
-      label: `Bloc ${r}/${block.reps} — allure marathon`,
-      durationMinutes: Math.round((kmEach * mpPace) / 60),
-      description: `${kmEach} km à allure marathon, régulier et relâché`,
+      label: "Facile",
+      durationMinutes: easyMin,
+      description: indoor ? "Tapis à 1 % d'inclinaison minimum, conversation aisée" : "Conversation aisée, régulier",
+      zoneLabel: "Facile",
+      heartRateHint: hrHint(cal.zones, "facile"),
+    });
+    steps.push({
+      label: "Finale — allure marathon",
+      durationMinutes: Math.round(workMinutes(kmEach)),
+      description: `${kmEach} km à allure marathon pour finir, régulier et relâché`,
       zoneLabel: "Allure marathon",
       heartRateHint: hrHint(cal.zones, "aerobie"),
       paceHint: `≈${fmtPace(mpPace)}/km`,
     });
-    if (r < block.reps) {
+  } else {
+    const warmupMin = Math.max(15, Math.round(minutes - workMinutes(kmEach) - ((reps - 1) * recoveryKm * easyPace) / 60 - cooldownMin));
+    steps.push({ ...warmupStep(warmupMin, indoor, cal.zones), label: "Échauffement facile" });
+    for (let r = 1; r <= reps; r++) {
       steps.push({
-        label: "Récupération",
-        durationMinutes: Math.round((recoveryKm * easyPace) / 60),
-        description: `${recoveryKm} km facile`,
-        zoneLabel: "Facile",
-        heartRateHint: hrHint(cal.zones, "facile"),
+        label: `Bloc ${r}/${reps} — allure marathon`,
+        durationMinutes: Math.round((kmEach * mpPace) / 60),
+        description: `${kmEach} km à allure marathon, régulier et relâché`,
+        zoneLabel: "Allure marathon",
+        heartRateHint: hrHint(cal.zones, "aerobie"),
+        paceHint: `≈${fmtPace(mpPace)}/km`,
       });
+      if (r < reps) {
+        steps.push({
+          label: "Récupération",
+          durationMinutes: Math.round((recoveryKm * easyPace) / 60),
+          description: `${recoveryKm} km facile`,
+          zoneLabel: "Facile",
+          heartRateHint: hrHint(cal.zones, "facile"),
+        });
+      }
     }
+    steps.push(cooldownStep(cooldownMin, indoor, cal.zones));
   }
-  steps.push(cooldownStep(cooldownMin, indoor, cal.zones));
 
-  const mpKm = kmEach * block.reps;
   const km = mpKm + stepKm(minutes - (mpKm * mpPace) / 60, easyPace);
   return {
     userId,
     plannedDate,
     kind: "long",
-    label: `Longue avec ${block.reps} × ${kmEach} km allure marathon`,
+    label: block.finish
+      ? `Longue avec finale de ${kmEach} km allure marathon`
+      : `Longue avec ${reps} × ${kmEach} km allure marathon`,
     variant: "mp_blocks",
     modality: "running",
     indoor,
@@ -641,9 +675,11 @@ function buildMpLongSession(
     targetDurationMinutes: minutes,
     targetDistanceKm: Math.round(km * 10) / 10,
     targetPaceSecondsPerKm: easyPace,
-    zoneSummary: "Facile → Allure marathon → Facile",
+    zoneSummary: "Facile → Allure marathon" + (block.finish ? "" : " → Facile"),
     steps,
-    whyNote: WHY_LONG_MP,
+    whyNote: shrunk
+      ? `${WHY_LONG_MP} (Bloc réduit à ${mpKm} km : ${block.reps * block.kmEach} km à allure marathon + ${minEasy} min faciles ne tenaient pas dans ${minutes} min.)`
+      : WHY_LONG_MP,
     zoneReference: [cal.zones.facile, cal.zones.aerobie],
     stridesAdded: false,
     downgradedFrom: null,
@@ -1434,7 +1470,7 @@ export function applyLiveDowngrade(params: {
 
 /** Rough km of one quality session (warm-up and cool-down included), growing with its level — only used to size the easy runs from a km target. */
 const PLAN_QUALITY_KM_BASE = 8;
-const PLAN_EASY_MIN_MINUTES = 25;
+const PLAN_EASY_MIN_MINUTES = RACE_PLAN_CONFIG.easyRunFloorMin;
 const PLAN_EASY_MAX_MINUTES = 80;
 
 const PLAN_QUALITY_KEYS: ReadonlyArray<RacePlanWeekInput["keySession"]> = ["threshold", "vo2max", "mp_tempo", "race_pace"];

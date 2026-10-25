@@ -7,6 +7,8 @@ export type DistanceClass = "marathon" | "half" | "short";
 export interface MpBlockSpec {
   reps: number;
   kmEach: number;
+  /** One continuous marathon-pace segment closing the long run (development phase), not reps. */
+  finish?: boolean;
 }
 
 export const RACE_PLAN_CONFIG = {
@@ -68,6 +70,15 @@ export const RACE_PLAN_CONFIG = {
   longRunMaxShareOfWeek: { base: 0.4, development: 0.4, specific: 0.45 } as Record<"base" | "development" | "specific", number>,
   /** After recovery weeks the long run resumes at this share of the anchor (the longest non-race run of 12 weeks). */
   resumeLongRunShare: 0.9,
+  /**
+   * Floors, which win over the share cap above (the plan warns when they push a week past its km
+   * instead of cutting): no long run under this many minutes per phase — tune-up, recovery, taper and
+   * race weeks excepted — and no easy run under easyRunFloorMin.
+   */
+  longRunFloorMin: { base: 60, development: 90, specific: 120 } as Record<"base" | "development" | "specific", number>,
+  easyRunFloorMin: 30,
+  /** Runs per week the plan assumes when it checks the floors against a week's km (the weekly setup has the final say). */
+  assumedRunsPerWeek: 4,
 
   // ── Race weeks (volumes INCLUDE the race distance) ────────────────────
   /** A tune-up week's km (race included) as a share of the previous full week: under a half / a half or longer. */
@@ -91,7 +102,14 @@ export const RACE_PLAN_CONFIG = {
      * holds a race or falls inside a post-race easy window gets no block. The earlier peak
      * is week -5 (12 km); the last one, week -2 (14 km).
      */
-    kmByWeeksToRace: { 6: 6, 5: 12, 3: 10, 2: 14 } as Record<number, number>,
+    kmByWeeksToRace: { 6: 8, 5: 12, 3: 10, 2: 14 } as Record<number, number>,
+    /**
+     * Development phase: from this many weeks before the goal race, non-deload long runs finish with
+     * one MP segment of these km (3 → 5 → 6, then 8 at week -6 above).
+     */
+    developmentKmByWeeksToRace: { 10: 3, 9: 5, 7: 6 } as Record<number, number>,
+    /** Easy minutes a long run keeps around its MP work: MP km × MP pace + this must fit in the run. */
+    minEasyMin: 30,
     /** Each total km as reps × km. */
     blocks: {
       6: { reps: 2, kmEach: 3 },

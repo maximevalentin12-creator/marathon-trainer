@@ -65,12 +65,16 @@ export interface RacePlanHistory {
   lastRace?: { raceDate: Date; distanceKm: number } | null;
   /** Easy pace (sec/km), to turn long-run minutes into km. */
   easyPaceSecPerKm?: number;
+  /** Marathon pace (sec/km) — lets the plan check that each MP block fits its long run. */
+  marathonPaceSecPerKm?: number;
 }
 
 /** Marathon-pace block inside a long run: `reps` × `kmEach` km. */
 export interface MpBlock {
   reps: number;
   kmEach: number;
+  /** One continuous MP segment closing the long run (development phase). */
+  finish?: boolean;
 }
 
 export interface RacePlanWeek {
@@ -169,6 +173,20 @@ function baselineWeeklyKm(history: RacePlanHistory, planStart: Date): number {
   const usable = weeks.filter((w) => w >= 0);
   // Fewer than two unflagged weeks is too thin a sample: fall back to all four.
   return median(usable.length >= 2 ? usable : weeks.map((w) => Math.max(0, w)));
+}
+
+function isoDay(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Shrinks an MP block to at most `maxKm` total: reps blocks go down to whole-km reps (min 2 km each),
+ * a finish segment down to its km (min 2). Null when even the smallest doesn't fit.
+ */
+function fitMpBlock(block: MpBlock, maxKm: number): MpBlock | null {
+  if (block.finish) return maxKm >= 2 ? { ...block, kmEach: Math.min(block.kmEach, maxKm) } : null;
+  const kmEach = Math.min(block.kmEach, Math.floor(maxKm / block.reps));
+  return kmEach >= 2 ? { ...block, kmEach } : null;
 }
 
 /** Longest NON-race run (min) of the 12 weeks before today, floored to 5 min, at least 30 — the long-run anchor. */
@@ -461,6 +479,29 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
     }
   }
 
+  // ── Floors win over the cap: long run ≥ 60 / 90 / 120 min (base / development / specific) ──
+  // Tune-up, recovery, taper and race weeks are excepted. A floor that pushes a week's minimum running
+  // past its planned km is reported, never cut.
+  const runs = CFG.assumedRunsPerWeek;
+  const easyFloorKm = (CFG.easyRunFloorMin * 60) / easyPace;
+  const overFloors: string[] = [];
+  for (const w of weeks) {
+    if ((w.phase !== "base" && w.phase !== "development" && w.phase !== "specific") || w.raceIds.length > 0 || w.longRunMin <= 0) continue;
+    const floor = CFG.longRunFloorMin[w.phase];
+    if (w.longRunMin < floor) {
+      w.longRunMin = floor;
+      w.notes.push(`Sortie longue relevée au plancher de ${floor} min (${w.phase === "base" ? "base" : w.phase === "development" ? "développement" : "spécifique"}).`);
+    }
+    const minimumKm = (w.longRunMin * 60) / easyPace + (runs - 1) * easyFloorKm;
+    if (minimumKm > w.targetKm + 0.5) overFloors.push(`${isoDay(w.weekStart)} (${Math.round(minimumKm)} km pour ${w.targetKm} prévus)`);
+  }
+  if (overFloors.length > 0) {
+    warnings.push(
+      `Les planchers (sortie longue, footings ≥ ${CFG.easyRunFloorMin} min sur ${runs} sorties) dépassent le volume prévu ${overFloors.length} semaine(s) : ` +
+        `${overFloors.join(", ")}. Le volume n'est pas réduit.`
+    );
+  }
+
   // ── Quality session per week ──
   let qualityCount = 0;
   for (const w of weeks) {
@@ -508,29 +549,56 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
     }
   }
 
-  // ── Marathon-pace blocks in the long run (marathon, specific phase) ──
-  // Blocks count as quality: a week holding a race, a deload, or inside a post-race easy window gets none.
+  // ── Marathon-pace work in the long run (marathon) ──
+  // Specific phase: blocks (12 km at -5, 14 km at -2). Development phase, from 10 weeks out: the non-deload
+  // long run finishes with one MP segment (3 → 5 → 6 km). They count as quality: a week holding a race, a
+  // deload, or inside a post-race easy window gets none.
   if (klass === "marathon") {
     const ladder = CFG.mpBlock.kmByWeeksToRace;
-    let peakMp = 0;
+    const devLadder = CFG.mpBlock.developmentKmByWeeksToRace;
     for (const w of weeks) {
-      const km = ladder[w.weeksToRace];
-      if (w.phase !== "specific" || w.isDeload || w.raceIds.length > 0 || w.longRunMin <= 0 || km === undefined) continue;
+      const dev = w.phase === "development";
+      const km = dev ? devLadder[w.weeksToRace] : w.phase === "specific" ? ladder[w.weeksToRace] : undefined;
+      if (km === undefined || w.isDeload || w.raceIds.length > 0 || w.longRunMin <= 0) continue;
       if (w.longRunFromDay > 0 || w.qualityFromDay > LONG_RUN_DAY) continue;
-      w.longRunMpBlock = CFG.mpBlock.blocks[km];
-      peakMp = Math.max(peakMp, km);
-      w.notes.push(`Sortie longue avec ${w.longRunMpBlock.reps} × ${w.longRunMpBlock.kmEach} km à allure marathon (${km} km au total).`);
+      w.longRunMpBlock = dev ? { reps: 1, kmEach: km, finish: true } : CFG.mpBlock.blocks[km];
     }
-    if (peakMp < CFG.mpBlock.targetPeakKm) {
-      warnings.push(
-        `Le bloc maximal à allure marathon est de ${peakMp} km (cible ${CFG.mpBlock.targetPeakKm} km) : ` +
-          "les courses intermédiaires et leurs jours faciles occupent les semaines voulues."
-      );
+
+    // Feasibility: MP km × MP pace + 30 min easy must fit in the long run — else the block shrinks.
+    const mpPace = history.marathonPaceSecPerKm;
+    if (mpPace) {
+      for (const w of weeks) {
+        const b = w.longRunMpBlock;
+        if (!b) continue;
+        const total = b.reps * b.kmEach;
+        const maxKm = Math.floor(((w.longRunMin - CFG.mpBlock.minEasyMin) * 60) / mpPace);
+        if (total <= maxKm) continue;
+        const fitted = fitMpBlock(b, maxKm);
+        warnings.push(
+          `${isoDay(w.weekStart)} : ${total} km à allure marathon + ${CFG.mpBlock.minEasyMin} min faciles ne tiennent pas dans ${w.longRunMin} min — ` +
+            (fitted ? `bloc réduit à ${fitted.reps * fitted.kmEach} km.` : "bloc supprimé.")
+        );
+        w.longRunMpBlock = fitted;
+      }
     }
     for (const w of weeks) {
-      if (w.phase === "specific" && !w.isDeload && !w.longRunMpBlock && w.longRunMin > 0) {
+      const b = w.longRunMpBlock;
+      if (b) {
+        w.notes.push(
+          b.finish
+            ? `Sortie longue terminée par ${b.kmEach} km à allure marathon.`
+            : `Sortie longue avec ${b.reps} × ${b.kmEach} km à allure marathon (${b.reps * b.kmEach} km au total).`
+        );
+      } else if (w.phase === "specific" && !w.isDeload && w.longRunMin > 0) {
         w.notes.push("Sortie longue facile : pas de bloc allure marathon.");
       }
+    }
+    const achieved = Math.max(0, ...weeks.filter((w) => w.phase === "specific").map((w) => (w.longRunMpBlock ? w.longRunMpBlock.reps * w.longRunMpBlock.kmEach : 0)));
+    if (achieved < CFG.mpBlock.targetPeakKm) {
+      warnings.push(
+        `Le bloc maximal à allure marathon est de ${achieved} km (cible ${CFG.mpBlock.targetPeakKm} km) : ` +
+          "les courses intermédiaires, leurs jours faciles ou la durée des sorties longues limitent les semaines voulues."
+      );
     }
   }
 
