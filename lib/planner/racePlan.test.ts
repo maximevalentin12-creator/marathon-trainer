@@ -376,16 +376,38 @@ describe("floors", () => {
   it("keeps long runs at 60 / 90 / 120 min or more outside tune-up, recovery, taper and race weeks", () => {
     for (const w of plan.weeks) {
       if (!["base", "development", "specific"].includes(w.phase) || w.raceIds.length > 0 || w.longRunMin === 0) continue;
+      if (w.longRunFromDay > 0) continue; // the week after a half is exempt
       const floor = RACE_PLAN_CONFIG.longRunFloorMin[w.phase as "base" | "development" | "specific"];
       assert.ok(w.longRunMin >= floor, `${w.weekStart.toISOString().slice(0, 10)} (${w.phase}): ${w.longRunMin} < ${floor}`);
     }
   });
-  it("warns instead of cutting when a floor pushes a week past its km", () => {
+  it("accepts a long run up to 50% of the week when a floor causes it, and warns beyond", () => {
+    const ok = buildRacePlan(planGoal, planTuneUps, planHistory());
+    assert.ok(!ok.warnings.some((x) => x.includes("plancher")), ok.warnings.join(" | "));
+  });
+  it("starts the base ramp at the 25 km reference when the computed baseline is lower but within 20%", () => {
+    const weekly = (km: number) => [
+      run("2026-09-22", km / 2), run("2026-09-24", km / 2),
+      run("2026-09-29", km / 2), run("2026-10-01", km / 2),
+      run("2026-10-06", km / 2), run("2026-10-08", km / 2),
+      run("2026-10-13", km / 2), run("2026-10-15", km / 2),
+    ];
+    const lifted = buildRacePlan(planGoal, planTuneUps, { ...planHistory(), activities: weekly(22) });
+    assert.equal(lifted.baselineKmComputed, 22);
+    assert.equal(lifted.baselineKm, 25);
+    const kept = buildRacePlan(planGoal, planTuneUps, { ...planHistory(), activities: weekly(15) });
+    assert.equal(kept.baselineKm, 15);
+  });
+  it("exempts the week after the half from the floor and caps its easy long run at 100 min", () => {
+    const week = plan.weeks.find((w) => w.weeksToRace === 3)!;
+    assert.ok(week.longRunMin <= 100);
+  });
+  it("warns instead of cutting when a floor pushes the long run past 50% of the week", () => {
     const small = buildRacePlan(planGoal, planTuneUps, {
       ...planHistory(),
       activities: [run("2026-10-06", 5), run("2026-10-13", 5), run("2026-09-29", 5), run("2026-09-22", 5)],
     });
-    assert.ok(small.warnings.some((x) => x.includes("planchers")));
+    assert.ok(small.warnings.some((x) => x.includes("plancher")));
   });
   it("never plans an easy run under 30 minutes", () => {
     const sessions = generate(races("2027-04-03", []), "2026-10-29");

@@ -77,8 +77,17 @@ export const RACE_PLAN_CONFIG = {
    */
   longRunFloorMin: { base: 60, development: 90, specific: 120 } as Record<"base" | "development" | "specific", number>,
   easyRunFloorMin: 30,
-  /** Runs per week the plan assumes when it checks the floors against a week's km (the weekly setup has the final say). */
-  assumedRunsPerWeek: 4,
+  /**
+   * A floor may take the long run up to this share of the week's km (deload weeks included: the long
+   * run stays, the rest of the week shrinks). The plan warns only above it.
+   */
+  longRunFloorMaxShare: 0.5,
+  /**
+   * The athlete's own steady level (their September 2026 weeks, ~25 km/week). When the computed
+   * baseline is lower but within baselineToleranceBelow of it, the ramp starts here instead.
+   */
+  baselineReferenceKm: 25,
+  baselineToleranceBelow: 0.2,
 
   // ── Race weeks (volumes INCLUDE the race distance) ────────────────────
   /** A tune-up week's km (race included) as a share of the previous full week: under a half / a half or longer. */
@@ -91,9 +100,9 @@ export const RACE_PLAN_CONFIG = {
   easyDaysPerKm: 1 / 3,
   /** After a race of at least this many km, the next week is easy only... */
   postRaceMinKm: 21,
-  /** ...with one easy long run (no MP), from this many days after the race, at most this long. */
+  /** ...with one easy long run (no MP, exempt from the long-run floor), from this many days after the race, at most this long. */
   postRaceLongRunFromDay: 6,
-  postRaceLongRunMaxMin: 120,
+  postRaceLongRunMaxMin: 100,
 
   // ── Marathon-pace blocks in the long run (marathon, specific phase) ───
   mpBlock: {

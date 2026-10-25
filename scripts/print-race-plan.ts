@@ -57,7 +57,12 @@ async function main() {
   const easy = calibration.easyPaceSecPerKm;
   const names = new Map(races.map((r) => [r.id, r.name]));
 
-  console.log(`Baseline: ${plan.baselineKm} km/week (median of the last 4 full weeks)`);
+  console.log(
+    `Baseline: ${plan.baselineKm} km/week` +
+      (plan.baselineKm !== plan.baselineKmComputed
+        ? ` (computed ${plan.baselineKmComputed}, lifted to the reference level)`
+        : " (median of the last 4 full weeks)")
+  );
   console.log(`Long-run anchor: ${plan.longRunAnchorMin} min (longest non-race run of the last 12 weeks)`);
   console.log(`Easy pace: ${Math.floor(easy / 60)}:${String(Math.round(easy % 60)).padStart(2, "0")}/km — peak week: ${plan.peakKm} km`);
   if (plan.warnings.length) console.log("Warnings:\n - " + plan.warnings.join("\n - "));

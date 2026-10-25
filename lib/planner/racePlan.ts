@@ -105,7 +105,10 @@ export interface RacePlanWeek {
 export interface RacePlan {
   weeks: RacePlanWeek[];
   warnings: string[];
+  /** The baseline the ramp starts from (may be lifted to the athlete's reference level). */
   baselineKm: number;
+  /** The median of the last 4 full weeks, before any lift. */
+  baselineKmComputed: number;
   longRunAnchorMin: number;
   peakKm: number;
 }
@@ -208,7 +211,7 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
   const weekCount = daysBetween(planStart, raceWeekStart) / 7 + 1;
 
   if (goalRace.raceDate < history.today || weekCount < 1) {
-    return { weeks: [], warnings: ["La course objectif est passée."], baselineKm: 0, longRunAnchorMin: 0, peakKm: 0 };
+    return { weeks: [], warnings: ["La course objectif est passée."], baselineKm: 0, baselineKmComputed: 0, longRunAnchorMin: 0, peakKm: 0 };
   }
 
   const leadWeeks = Math.ceil(daysBetween(history.today, goalRace.raceDate) / 7);
@@ -222,7 +225,13 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
   const easyPace = history.easyPaceSecPerKm ?? DEFAULT_EASY_PACE_SEC_PER_KM;
   const baselineRaw = baselineWeeklyKm(history, planStart);
   if (baselineRaw <= 0) warnings.push(`Aucun volume récent trouvé : base de ${DEFAULT_BASELINE_KM} km par défaut.`);
-  const baseline = baselineRaw > 0 ? baselineRaw : DEFAULT_BASELINE_KM;
+  const computedBaseline = baselineRaw > 0 ? baselineRaw : DEFAULT_BASELINE_KM;
+  // A computed baseline a little under the athlete's steady level (a sick week, a sync gap) starts the ramp at that level.
+  const baseline =
+    computedBaseline < CFG.baselineReferenceKm &&
+    computedBaseline >= CFG.baselineReferenceKm * (1 - CFG.baselineToleranceBelow)
+      ? CFG.baselineReferenceKm
+      : computedBaseline;
   const anchor = longRunAnchorMin(history);
 
   // Recovery after the last race, when it ended less than 14 days before the plan starts.
@@ -480,24 +489,23 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
   }
 
   // ── Floors win over the cap: long run ≥ 60 / 90 / 120 min (base / development / specific) ──
-  // Tune-up, recovery, taper and race weeks are excepted. A floor that pushes a week's minimum running
-  // past its planned km is reported, never cut.
-  const runs = CFG.assumedRunsPerWeek;
-  const easyFloorKm = (CFG.easyRunFloorMin * 60) / easyPace;
+  // Tune-up, recovery, taper, race and post-half weeks are excepted. A floor may take the long run up to
+  // 50 % of the week (the rest of the week shrinks); past that the plan warns, never cuts.
   const overFloors: string[] = [];
   for (const w of weeks) {
     if ((w.phase !== "base" && w.phase !== "development" && w.phase !== "specific") || w.raceIds.length > 0 || w.longRunMin <= 0) continue;
+    if (afterHalf.has(w)) continue;
     const floor = CFG.longRunFloorMin[w.phase];
     if (w.longRunMin < floor) {
       w.longRunMin = floor;
       w.notes.push(`Sortie longue relevée au plancher de ${floor} min (${w.phase === "base" ? "base" : w.phase === "development" ? "développement" : "spécifique"}).`);
     }
-    const minimumKm = (w.longRunMin * 60) / easyPace + (runs - 1) * easyFloorKm;
-    if (minimumKm > w.targetKm + 0.5) overFloors.push(`${isoDay(w.weekStart)} (${Math.round(minimumKm)} km pour ${w.targetKm} prévus)`);
+    const share = (w.longRunMin * 60) / easyPace / w.targetKm;
+    if (share > CFG.longRunFloorMaxShare) overFloors.push(`${isoDay(w.weekStart)} (${Math.round(share * 100)} % de ${w.targetKm} km)`);
   }
   if (overFloors.length > 0) {
     warnings.push(
-      `Les planchers (sortie longue, footings ≥ ${CFG.easyRunFloorMin} min sur ${runs} sorties) dépassent le volume prévu ${overFloors.length} semaine(s) : ` +
+      `Le plancher de sortie longue dépasse ${CFG.longRunFloorMaxShare * 100} % du volume ${overFloors.length} semaine(s) : ` +
         `${overFloors.join(", ")}. Le volume n'est pas réduit.`
     );
   }
@@ -612,7 +620,14 @@ export function buildRacePlan(goalRace: PlanRace, tuneUps: PlanRace[], history: 
     warnings.push(`Sortie longue maximale limitée à ${peakLong} min : +${CFG.longRunStepMin} min par semaine de charge depuis ${anchor} min.`);
   }
 
-  return { weeks, warnings, baselineKm: Math.round(baseline * 10) / 10, longRunAnchorMin: anchor, peakKm };
+  return {
+    weeks,
+    warnings,
+    baselineKm: Math.round(baseline * 10) / 10,
+    baselineKmComputed: Math.round(computedBaseline * 10) / 10,
+    longRunAnchorMin: anchor,
+    peakKm,
+  };
 }
 
 /** The plan's week containing `date`, or null. */
