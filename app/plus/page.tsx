@@ -38,7 +38,6 @@ export default function PlusPage() {
       <h2 className="text-sm font-semibold text-gray-700 mb-2 px-1">Données</h2>
       <div className="space-y-4">
         <Card title="Synchronisation Garmin">
-          <p className="text-xs text-gray-500 mb-3">Importe tes dernières activités depuis Garmin Connect.</p>
           <GarminSyncCard />
         </Card>
         <Card title="Import CSV Garmin">

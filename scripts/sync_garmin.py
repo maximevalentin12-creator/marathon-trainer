@@ -31,9 +31,21 @@ Auth model (see supabase/schema.sql's garmin_tokens table):
     Garmin at all until that passes. Retrying during a block is what extends
     it.
 
+LOG HYGIENE (this script runs in a PUBLIC repository's GitHub Actions, so its logs are public):
+    It only ever logs counts, dates and error CLASS NAMES. Never tokens, credentials, e-mails, user ids, activity
+    ids/names/GPS/times, URLs or raw exception text (see safe_error()/db_error()). Third-party loggers (httpx logs
+    every request URL at INFO, garminconnect logs per-strategy details) are silenced or kept off the console.
+    Keep it that way when editing: do not add log lines that interpolate activity or user data.
+
+Scheduled / CI mode (GARMIN_NO_CREDENTIAL_LOGIN=1, set by .github/workflows/sync-garmin.yml):
+    The run may only RESUME the session stored in garmin_tokens. It never sends a username/password to Garmin —
+    if no usable stored session exists it stops with a clear message (run --login locally to create one), and
+    GARMIN_USERNAME / GARMIN_PASSWORD are not even required. Together with the rate-limit cooldown below, a
+    scheduled run can never fall back to a credential login.
+
 Required env vars (also read from .env in project root via python-dotenv):
-    GARMIN_USERNAME       your Garmin Connect email
-    GARMIN_PASSWORD       your Garmin Connect password
+    GARMIN_USERNAME       your Garmin Connect email       (not needed in scheduled/CI mode)
+    GARMIN_PASSWORD       your Garmin Connect password    (not needed in scheduled/CI mode)
     SUPABASE_URL          https://<project>.supabase.co
     SUPABASE_SERVICE_KEY  service-role key (bypasses RLS)
 
@@ -58,6 +70,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -69,12 +82,49 @@ try:
 except ImportError:
     pass
 
+# Root stays at WARNING so third-party libraries are quiet (httpx would log every Supabase request URL at INFO);
+# only this script's own logger runs at INFO.
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+for _noisy in ("httpx", "httpcore", "urllib3", "hpack", "postgrest", "supabase", "gotrue", "storage3", "realtime", "supafunc"):
+    logging.getLogger(_noisy).setLevel(logging.ERROR)
+# garminconnect's own warnings can carry request details: keep them OFF the console. capture_garmin_warnings()
+# below still reads them (its handler sits on this logger) to detect a 429 / Cloudflare block.
+_garmin_logger = logging.getLogger("garminconnect")
+_garmin_logger.setLevel(logging.WARNING)
+_garmin_logger.propagate = False
+
+_REDACTIONS = (
+    (re.compile(r"https?://\S+"), "<url>"),
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "<email>"),
+    (re.compile(r"Bearer\s+\S+", re.I), "Bearer <redacted>"),
+    (re.compile(r"eyJ[\w-]+\.[\w-]+\.[\w-]+"), "<jwt>"),
+    (re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"), "<uuid>"),
+    (re.compile(r"\b\d{6,}\b"), "<number>"),
+    (re.compile(r"\b[A-Za-z0-9_\-]{32,}\b"), "<secret>"),
+)
+
+
+def safe_error(exc: BaseException) -> str:
+    """An error class name plus a short, redacted message — safe for a public log. For Garmin/library errors."""
+    text = str(exc)
+    for pattern, replacement in _REDACTIONS:
+        text = pattern.sub(replacement, text)
+    return f"{type(exc).__name__}: {text[:120]}"
+
+
+def db_error(exc: BaseException) -> str:
+    """Database errors can quote the offending row (ids, timestamps): log only the class and the PostgREST code."""
+    return f"{type(exc).__name__} (code {getattr(exc, 'code', None) or 'n/a'})"
+
+
+class CredentialLoginBlocked(RuntimeError):
+    """Raised instead of sending a username/password to Garmin when GARMIN_NO_CREDENTIAL_LOGIN is set."""
 
 try:
     import garminconnect
@@ -190,27 +240,27 @@ def classify_login_failure(exc: BaseException, warning_messages: list[str]) -> t
       "other"        — genuinely unclear; don't claim either, don't cooldown.
     """
     if is_rate_limited(exc):
-        return "rate_limited", f"Rate limited by Garmin: {exc}"
+        return "rate_limited", f"Rate limited by Garmin ({safe_error(exc)})."
 
     if garminconnect is not None and isinstance(exc, garminconnect.GarminConnectAuthenticationError):
         return (
             "auth_failed",
-            f"Authentication failed — check GARMIN_USERNAME/GARMIN_PASSWORD "
-            f"(this is a credentials problem, not a Garmin rate limit): {exc}",
+            "Authentication failed — check GARMIN_USERNAME/GARMIN_PASSWORD "
+            f"(this is a credentials problem, not a Garmin rate limit) ({safe_error(exc)}).",
         )
 
     if any_strategy_rate_limited(warning_messages):
         return (
             "rate_limited",
             "Rate limited by Garmin: one or more login strategies were throttled "
-            f"(429/Cloudflare) before the overall attempt failed with: {exc}",
+            f"(429/Cloudflare) before the overall attempt failed ({safe_error(exc)}).",
         )
 
     return (
         "other",
-        f"Login failed for a reason that's neither a clear Garmin rate limit nor a "
-        f"clear credentials rejection — check GARMIN_USERNAME/GARMIN_PASSWORD, but this "
-        f"could also be transient: {exc}",
+        "Login failed for a reason that's neither a clear Garmin rate limit nor a "
+        "clear credentials rejection — check GARMIN_USERNAME/GARMIN_PASSWORD, but this "
+        f"could also be transient ({safe_error(exc)}).",
     )
 
 
@@ -282,6 +332,8 @@ def install_login_counter(api) -> dict:
     state = {"count": 0}
 
     def counting_login(*args, **kwargs):
+        if os.environ.get("GARMIN_NO_CREDENTIAL_LOGIN"):
+            raise CredentialLoginBlocked("credential login is disabled in scheduled runs")
         state["count"] += 1
         log.warning("Credential login #%d this run (username/password SSO flow).", state["count"])
         return original_login(*args, **kwargs)
@@ -438,9 +490,9 @@ def fetch_laps(api, db, user_id: str, token_payload: dict | None, cooldown_minut
             if is_rate_limited(exc):
                 until = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
                 record_cooldown(db, user_id, until, existing_token_payload=token_payload)
-                log.error("Rate limited by Garmin while fetching laps: %s. Cooldown until %s.", exc, until.isoformat())
+                log.error("Rate limited by Garmin while fetching laps (%s). Cooldown until %s.", type(exc).__name__, until.isoformat())
                 return {"laps_fetched": fetched, "laps_errors": errors + 1, "laps_pending": len(pending) - fetched, "rate_limited": True}
-            log.warning("Failed to fetch laps for activity %s: %s", activity_id, exc)
+            log.warning("Failed to fetch laps for one activity (%s).", type(exc).__name__)
             errors += 1
             continue
         # An empty list is stored too, so an activity without laps isn't re-fetched.
@@ -522,8 +574,13 @@ def main() -> None:
         log.error("supabase not installed. Run: pip install -r scripts/requirements.txt")
         sys.exit(1)
 
-    username = require_env("GARMIN_USERNAME")
-    password = require_env("GARMIN_PASSWORD")
+    no_credential_login = bool(os.environ.get("GARMIN_NO_CREDENTIAL_LOGIN"))
+    if args.login and (no_credential_login or os.environ.get("GITHUB_ACTIONS")):
+        log.error("--login is a local, interactive bootstrap: it is refused in scheduled/CI runs.")
+        sys.exit(1)
+    # Scheduled runs only resume a stored session, so they need no Garmin credentials at all.
+    username = os.environ.get("GARMIN_USERNAME", "") if no_credential_login else require_env("GARMIN_USERNAME")
+    password = os.environ.get("GARMIN_PASSWORD", "") if no_credential_login else require_env("GARMIN_PASSWORD")
     supabase_url = require_env("SUPABASE_URL")
     supabase_key = require_env("SUPABASE_SERVICE_KEY")
     user_id = args.user_id or os.environ.get("USER_ID") or None
@@ -549,12 +606,18 @@ def main() -> None:
         if cooldown_until and cooldown_until > datetime.now(timezone.utc):
             log.error(cooldown_remaining_message(cooldown_until))
             sys.exit(1)
+        if no_credential_login and not token_payload:
+            log.error(
+                "No stored Garmin session and credential login is disabled for scheduled runs. "
+                "Run once, locally: python scripts/sync_garmin.py --login --user-id <your uuid>"
+            )
+            sys.exit(1)
     else:
         log.warning("Running anonymously (--allow-anonymous) — no token/cooldown persistence this run.")
 
     # ─── --login: one-time bootstrap, credential login only, then exit ────
     if args.login:
-        log.info("Bootstrap login for %s …", username)
+        log.info("Bootstrap login …")
         api = garminconnect.Garmin(username, password, prompt_mfa=lambda: input("MFA code: "))
         try:
             login_state = do_login(api, token_payload=None)  # always force a fresh credential login
@@ -574,7 +637,7 @@ def main() -> None:
         return
 
     # ─── Normal sync run ────────────────────────────────────────────────
-    log.info("Connecting to Garmin Connect as %s …", username)
+    log.info("Connecting to Garmin Connect …")
     api = garminconnect.Garmin(username, password)
 
     try:
@@ -584,6 +647,12 @@ def main() -> None:
         # FIRST, then falls back to the per-strategy warnings do_login() captured, and only
         # then treats a clean GarminConnectAuthenticationError as a credentials problem —
         # see its docstring for why a naive isinstance() check on its own would misfire.
+        if isinstance(exc, CredentialLoginBlocked) or isinstance(exc.__cause__, CredentialLoginBlocked):
+            log.error(
+                "The stored Garmin session could not be resumed, and scheduled runs never log in with a password. "
+                "Run locally: python scripts/sync_garmin.py --login --user-id <your uuid>"
+            )
+            sys.exit(1)
         reason, message = classify_login_failure(exc, getattr(exc, "garmin_warning_messages", []))
         log.error(message)
         if reason == "rate_limited":
@@ -607,7 +676,7 @@ def main() -> None:
         try:
             save_tokens(db, user_id, json.loads(api.client.dumps()))
         except Exception as exc:  # noqa: BLE001
-            log.debug("Post-fetch token save skipped: %s", exc)
+            log.debug("Post-fetch token save skipped (%s).", db_error(exc))
         summary["credential_logins"] = login_state["count"]
         log.info("Done — %s", summary)
         print(json.dumps(summary))
@@ -635,7 +704,7 @@ def main() -> None:
             until = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
             if user_id:
                 record_cooldown(db, user_id, until, existing_token_payload=json.loads(api.client.dumps()))
-            log.error("Rate limited by Garmin while fetching activities: %s", exc)
+            log.error("Rate limited by Garmin while fetching activities (%s).", type(exc).__name__)
             log.error("Cooldown recorded until %s. Not retrying.", until.isoformat())
             sys.exit(1)
         raise
@@ -647,7 +716,7 @@ def main() -> None:
         try:
             save_tokens(db, user_id, json.loads(api.client.dumps()))
         except Exception as exc:  # noqa: BLE001
-            log.debug("Post-fetch token save skipped: %s", exc)
+            log.debug("Post-fetch token save skipped (%s).", db_error(exc))
 
     inserted = skipped = errors = replaced = 0
 
@@ -691,12 +760,11 @@ def main() -> None:
             try:
                 adopt_synthetic_row(db, synthetic, int(garmin_id))
                 replaced += 1
-                log.info("Replaced CSV copy %s with native activity %s.", synthetic["garmin_activity_id"], garmin_id)
             except Exception as exc:  # noqa: BLE001
                 log.warning(
-                    "Could not replace CSV copy %s with native activity %s (is the ON UPDATE CASCADE "
-                    "migration in supabase/schema.sql applied?): %s",
-                    synthetic["garmin_activity_id"], garmin_id, exc,
+                    "Could not replace a CSV copy with its native activity (is the ON UPDATE CASCADE "
+                    "migration in supabase/schema.sql applied?) — %s.",
+                    db_error(exc),
                 )
                 errors += 1
                 continue
@@ -712,7 +780,7 @@ def main() -> None:
             else:
                 skipped += 1
         except Exception as exc:  # noqa: BLE001
-            log.warning("Failed to upsert activity %s: %s", garmin_id, exc)
+            log.warning("Failed to upsert one activity (%s).", db_error(exc))
             errors += 1
 
     summary = {
@@ -727,4 +795,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        # No traceback: it would print the exception's raw message (URLs, ids, row data) to a public CI log.
+        # Set GARMIN_SYNC_DEBUG=1 on your own machine to get the full traceback.
+        if os.environ.get("GARMIN_SYNC_DEBUG") and not os.environ.get("GITHUB_ACTIONS"):
+            raise
+        log.error("Unexpected failure — %s", safe_error(exc))
+        sys.exit(1)

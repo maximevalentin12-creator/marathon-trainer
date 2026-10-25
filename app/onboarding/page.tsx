@@ -194,7 +194,7 @@ export default function OnboardingPage() {
     syncAbortRef.current = controller;
 
     try {
-      await fetch("/api/garmin/sync", { signal: controller.signal });
+      await fetch("/api/garmin/sync", { method: "POST", signal: controller.signal });
     } catch {
       // network error or aborted — either way fall through
     }
