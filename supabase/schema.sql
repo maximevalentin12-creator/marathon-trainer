@@ -197,7 +197,7 @@ CREATE TABLE weekly_setups (
   -- Running session count. runs_per_week + non_impact_sessions is the week's total, 1-4.
   runs_per_week  SMALLINT NOT NULL CHECK (runs_per_week BETWEEN 0 AND 4),
   indoor_runs    SMALLINT NOT NULL DEFAULT 0 CHECK (indoor_runs BETWEEN 0 AND 4),
-  -- Non-impact (vélo d'appartement / assault bike / élliptique) session count —
+  -- Non-impact (vélo d'appartement / assault bike / elliptique) session count —
   -- an alternative modality to running, same physiological roles, no impact.
   non_impact_sessions SMALLINT NOT NULL DEFAULT 0 CHECK (non_impact_sessions BETWEEN 0 AND 4),
   -- Subset of 'bike'/'assault_bike'/'elliptical' the user has access to.

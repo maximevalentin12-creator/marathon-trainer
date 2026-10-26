@@ -319,19 +319,21 @@ function SessionCard({
       )}
 
       {session.steps && session.steps.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           {session.steps.map((step, i) => (
-            <div key={i} className="text-xs flex gap-2">
-              <span className="w-32 shrink-0 text-gray-500">{step.label}</span>
-              <span className="flex-1 text-gray-700">
+            <div key={i} className="text-xs">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="text-gray-500">{step.label}</span>
+                {(step.heartRateHint || step.paceHint) && (
+                  <span className="text-gray-400 tabular-nums">
+                    {[step.heartRateHint, step.paceHint].filter(Boolean).join(" / ")}
+                  </span>
+                )}
+              </div>
+              <p className="min-w-0 text-gray-700 break-words">
                 {step.durationMinutes != null ? `${step.durationMinutes} min — ` : ""}
                 {step.description}
-              </span>
-              {(step.heartRateHint || step.paceHint) && (
-                <span className="shrink-0 text-gray-400 tabular-nums">
-                  {[step.heartRateHint, step.paceHint].filter(Boolean).join(" / ")}
-                </span>
-              )}
+              </p>
             </div>
           ))}
         </div>
@@ -412,7 +414,7 @@ function ZoneLegend({ zones }: { zones: Record<EffortZoneId, EffortZone> }) {
 const MACHINE_LABEL_CAP: Record<NonImpactMachine, string> = {
   bike: "Vélo d'appartement",
   assault_bike: "Assault bike",
-  elliptical: "Élliptique",
+  elliptical: "Elliptique",
 };
 
 function SetupForm({
@@ -492,7 +494,7 @@ function SetupForm({
       </div>
 
       <div>
-        <span className="text-xs text-gray-500 block mb-2">En plus, des séances sans impact (vélo, élliptique) ?</span>
+        <span className="text-xs text-gray-500 block mb-2">En plus, des séances sans impact (vélo, elliptique) ?</span>
         <div className="flex gap-2">
           {([0, 1, 2] as const).map((n) => (
             <button
@@ -815,9 +817,9 @@ export default function WeeklyPlanCard() {
         <>
           <div className="flex items-center justify-between">
             <p className="text-xs text-gray-500">
-              {week?.setup?.runsPerWeek ?? 0} sortie{(week?.setup?.runsPerWeek ?? 0) > 1 ? "s" : ""}
+              {week?.setup?.runsPerWeek ?? 0} sortie{(week?.setup?.runsPerWeek ?? 0) > 1 ? "s" : ""} running
               {week?.setup?.nonImpactSessions
-                ? ` + ${week.setup.nonImpactSessions} cardio sans impact`
+                ? ` · ${week.setup.nonImpactSessions} cardio sans impact`
                 : ""}{" "}
               cette semaine
               {week?.setup?.indoorRuns ? `, dont ${week.setup.indoorRuns} en intérieur` : ""}.

@@ -79,27 +79,20 @@ function whyRace(distanceKm: number): string {
 
 // ─── Treadmill helpers (spec §4bis — min 1% incline rule) ───────────────────
 
-const INCLINE_PATTERN = [1, 3, 1, 4];
-
-/** Alternating-incline segments for a continuous indoor session, breaking monotony without changing target effort. */
-function inclineSteps(totalMinutes: number, zoneLabel: string, heartRateHint: string, segmentLen = 6): SessionStep[] {
-  const steps: SessionStep[] = [];
-  let remaining = totalMinutes;
-  let i = 0;
-  while (remaining > 0) {
-    const len = Math.min(segmentLen, remaining);
-    const incline = INCLINE_PATTERN[i % INCLINE_PATTERN.length];
-    steps.push({
-      label: `Tapis — inclinaison ${incline} %`,
-      durationMinutes: len,
-      description: "Ajuste légèrement l'allure pour garder la même sensation d'effort",
-      zoneLabel,
-      heartRateHint,
-    });
-    remaining -= len;
-    i++;
-  }
-  return steps;
+/** One continuous easy block. Treadmill stays at 1–2 % — varied inclines belong to hill sessions only. */
+function continuousStep(
+  minutes: number,
+  indoor: boolean,
+  zones: HeartRateZones,
+  description = "Conversation aisée du début à la fin"
+): SessionStep {
+  return {
+    label: "Continu",
+    durationMinutes: minutes,
+    description: indoor ? `${description} — tapis à 1–2 % d'inclinaison` : description,
+    zoneLabel: "Facile",
+    heartRateHint: hrHint(zones, "facile"),
+  };
 }
 
 function warmupStep(minutes: number, indoor: boolean, zones: HeartRateZones): SessionStep {
@@ -187,18 +180,7 @@ function thresholdTotalMinutes({ reps, workMin, recoveryMin }: IntervalStructure
 // ─── Session-body builders ───────────────────────────────────────────────
 
 function buildEasySteps(minutes: number, indoor: boolean, zones: HeartRateZones): SessionStep[] {
-  if (!indoor) {
-    return [
-      {
-        label: "Continu",
-        durationMinutes: minutes,
-        description: "Conversation aisée du début à la fin",
-        zoneLabel: "Facile",
-        heartRateHint: hrHint(zones, "facile"),
-      },
-    ];
-  }
-  return inclineSteps(minutes, "Facile", hrHint(zones, "facile"));
+  return [continuousStep(minutes, indoor, zones)];
 }
 
 function buildLongSteps(
@@ -207,35 +189,13 @@ function buildLongSteps(
   indoor: boolean,
   zones: HeartRateZones
 ): SessionStep[] {
-  if (variant !== "progression") {
-    return indoor
-      ? inclineSteps(minutes, "Facile", hrHint(zones, "facile"))
-      : [
-          {
-            label: "Continu",
-            durationMinutes: minutes,
-            description: "Conversation aisée du début à la fin",
-            zoneLabel: "Facile",
-            heartRateHint: hrHint(zones, "facile"),
-          },
-        ];
-  }
+  if (variant !== "progression") return [continuousStep(minutes, indoor, zones)];
 
   const finalMin = Math.max(5, round5(minutes * 0.12));
   const baseMin = minutes - finalMin;
-  const baseSteps = indoor
-    ? inclineSteps(baseMin, "Facile", hrHint(zones, "facile"))
-    : [
-        {
-          label: "Continu",
-          durationMinutes: baseMin,
-          description: "Conversation aisée",
-          zoneLabel: "Facile",
-          heartRateHint: hrHint(zones, "facile"),
-        },
-      ];
+  const baseSteps = [continuousStep(baseMin, indoor, zones, "Conversation aisée")];
   const finalStep: SessionStep = {
-    label: indoor ? "Fin — inclinaison 4 %" : "Fin de séance",
+    label: "Fin de séance",
     durationMinutes: finalMin,
     description: "Dernière portion en zone Aérobie — un peu plus soutenu, sans forcer",
     zoneLabel: "Aérobie",

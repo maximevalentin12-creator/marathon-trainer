@@ -82,7 +82,7 @@ function offPlanLabel(activityType: string | null): string {
   if (v.includes("trail")) return "Trail";
   if (v.includes("running")) return "Course";
   if (v.includes("cycling")) return "Vélo";
-  if (v.includes("elliptical")) return "Élliptique";
+  if (v.includes("elliptical")) return "Elliptique";
   return activityType ? activityType.replace(/_/g, " ") : "Activité";
 }
 

@@ -17,7 +17,7 @@ export function isNonImpactMachine(value: unknown): value is NonImpactMachine {
 export const MACHINE_LABEL_FR: Record<NonImpactMachine, string> = {
   bike: "vélo d'appartement",
   assault_bike: "assault bike",
-  elliptical: "élliptique",
+  elliptical: "elliptique",
 };
 
 // ─── "Why" notes — same plain-language register as the running ones ────────
@@ -32,7 +32,7 @@ const WHY_NON_IMPACT_VO2MAX =
 /**
  * Which machine a given role prefers, when more than one is available.
  * Assault bike is best for short, very hard efforts (VO2max); a steadier
- * vélo/élliptique suits sustained work (facile, seuil).
+ * vélo/elliptique suits sustained work (facile, seuil).
  */
 function pickMachine(role: "easy" | "threshold" | "vo2max", machines: NonImpactMachine[]): NonImpactMachine {
   const preference: NonImpactMachine[] =
@@ -68,7 +68,7 @@ const NON_IMPACT_VO2MAX_ASSAULT_LEVELS: ReadonlyArray<{ reps: number; workMin: n
   { reps: 10, workMin: 2, recoveryFactor: 1 },
 ];
 
-/** Vélo/élliptique: "4-6 × 3 min", equal recovery. */
+/** Vélo/elliptique: "4-6 × 3 min", equal recovery. */
 const NON_IMPACT_VO2MAX_STEADY_LEVELS: ReadonlyArray<{ reps: number; workMin: number }> = [
   { reps: 4, workMin: 3 },
   { reps: 4, workMin: 3 },
@@ -123,7 +123,7 @@ export function buildNonImpactEasySession(
       {
         label: "Continu",
         durationMinutes: minutes,
-        description: "Effort modéré et régulier, à l'aise pour parler — pilote au ressenti, la FC n'est qu'un repère",
+        description: "Effort régulier, à l'aise pour parler — pilote au ressenti",
         zoneLabel: "Facile",
         heartRateHint: nonImpactHrHint(niZones, "facile"),
       },

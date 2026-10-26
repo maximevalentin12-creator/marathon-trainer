@@ -10,7 +10,7 @@ export type SessionKind = "easy" | "long" | "threshold" | "vo2max" | "rest" | "r
 
 /**
  * Running vs. non-impact cardio (vélo d'appartement / assault bike /
- * élliptique) — same physiological roles (SessionKind), different modality.
+ * elliptique) — same physiological roles (SessionKind), different modality.
  * Non-impact exists to grow cardio volume without extra joint/tendon load,
  * and as a fallback when pain is reported.
  */
