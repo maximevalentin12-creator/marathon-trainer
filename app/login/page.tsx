@@ -2,7 +2,6 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/auth/browser";
 
 function LoginForm() {
   const router = useRouter();
@@ -16,9 +15,20 @@ function LoginForm() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { error } = await createSupabaseBrowserClient().auth.signInWithPassword({ email: email.trim(), password });
+    // Server-side sign-in: the session cookies must come from Set-Cookie headers to last beyond Safari's 7-day cap.
+    let ok = false;
+    try {
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      ok = r.ok;
+    } catch {
+      // Network error: handled below like a failed sign-in.
+    }
     setBusy(false);
-    if (error) {
+    if (!ok) {
       setError("E-mail ou mot de passe incorrect.");
       return;
     }

@@ -39,7 +39,7 @@ export default function TabBar() {
     <>
       <nav
         aria-label="Navigation principale"
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 pb-[env(safe-area-inset-bottom)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-200 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       >
         <ul className="flex">
           {TABS.map((t) => {

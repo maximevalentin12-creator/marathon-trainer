@@ -5,3 +5,12 @@
 html {
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Standalone on iPhone (viewport-fit=cover): keep content out of the notch, landscape sides and home bar.
+   The bottom tab bar is fixed and pads itself; this adds room under the last card. */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+}

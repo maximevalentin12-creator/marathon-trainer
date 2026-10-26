@@ -8,6 +8,13 @@ export const metadata: Metadata = {
   title: "Marathon Trainer",
   description: "Personal marathon training planner",
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -16,7 +23,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#4a7c3f",
+  themeColor: "#DCC9EE",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",

@@ -3,13 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 /**
  * Every page and API route needs a signed-in user, except:
- *  - /login (the sign-in page);
+ *  - /login (the sign-in page) and /api/auth/login (its server-side sign-in);
  *  - /api/google/webhook — Google's push notifications carry no Supabase session; the route authenticates
  *    them itself with the per-channel token stored in google_calendar_sync.
  * Static assets (manifest, service worker, icons) are excluded by the matcher below.
  * The middleware also refreshes the session cookies.
  */
-const PUBLIC_PATHS = ["/login", "/api/google/webhook"];
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/google/webhook"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
