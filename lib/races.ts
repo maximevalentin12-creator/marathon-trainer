@@ -2,6 +2,7 @@
 // for now only the temporary race mode reads them (lib/planner/race.ts).
 
 import type { Db } from "@/lib/supabase";
+import { loadDebriefSignals } from "@/lib/debrief";
 import {
   addDays,
   isoDate,
@@ -104,19 +105,9 @@ export async function loadRaces(db: ServiceClient, userId: string): Promise<Race
 export async function racePainWarnings(db: ServiceClient, userId: string, raceDates: string[]): Promise<Set<string>> {
   if (raceDates.length === 0) return new Set();
   const sorted = [...raceDates].sort();
-  const { data, error } = await db
-    .from("subjective_entries")
-    .select("entry_date, pain_score, energy_score")
-    .eq("user_id", userId)
-    .gte("pain_score", RACE_PAIN_WARNING_MIN_SCORE)
-    .gte("entry_date", isoDate(addDays(parseIsoDate(sorted[0]), -2)))
-    .lte("entry_date", sorted[sorted.length - 1]);
-  if (error) throw new Error(error.message);
-  const entries: SubjectiveSignal[] = (data ?? []).map((e) => ({
-    entryDate: parseIsoDate(e.entry_date),
-    painScore: e.pain_score ?? 0,
-    energyScore: e.energy_score ?? 3,
-  }));
+  const entries: SubjectiveSignal[] = (
+    await loadDebriefSignals(db, userId, isoDate(addDays(parseIsoDate(sorted[0]), -2)), sorted[sorted.length - 1])
+  ).filter((s) => s.painScore >= RACE_PAIN_WARNING_MIN_SCORE);
   return new Set(raceDates.filter((d) => painReportedBeforeRace(entries, parseIsoDate(d))));
 }
 

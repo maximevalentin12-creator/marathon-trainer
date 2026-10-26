@@ -3,6 +3,7 @@
 
 import type { Db } from "@/lib/supabase";
 import { loadRaces } from "@/lib/races";
+import { loadDebriefSignals } from "@/lib/debrief";
 import { loadAthleteCalibration } from "@/lib/athlete/profile";
 import { addDays, isoDate, parseIsoDate, toMonday } from "@/lib/planner/dates";
 import { isRaceActivity, resolveRacePlanWeek } from "@/lib/planner/racePlanWeek";
@@ -71,12 +72,9 @@ export async function loadRacePlanOverview(db: ServiceClient, userId: string, no
     .eq("user_id", userId)
     .gte("start_time", addDays(today, -120).toISOString());
   if (error) throw new Error(error.message);
-  const { data: flags } = await db
-    .from("subjective_entries")
-    .select("entry_date")
-    .eq("user_id", userId)
-    .gte("pain_score", RACE_PAIN_WARNING_MIN_SCORE)
-    .gte("entry_date", isoDate(addDays(today, -42)));
+  const flags = (await loadDebriefSignals(db, userId, isoDate(addDays(today, -42)), isoDate(today)))
+    .filter((s) => s.painScore >= RACE_PAIN_WARNING_MIN_SCORE)
+    .map((s) => ({ entry_date: isoDate(s.entryDate) }));
   const { calibration } = await loadAthleteCalibration(db, userId);
 
   const activities = (rows ?? []).map((a) => {

@@ -8,6 +8,7 @@ import type { Db } from "@/lib/supabase";
 import { pushUserSessions } from "@/lib/google/sync";
 import { loadAthleteCalibration } from "@/lib/athlete/profile";
 import { loadRaces, attachRacePainWarnings } from "@/lib/races";
+import { loadDebriefPlannerInput, loadDebriefSignals, resolveStaleEpisodes } from "@/lib/debrief";
 import {
   buildWeekPlan,
   computeLongRunAnchorMinutes,
@@ -225,13 +226,14 @@ export async function regenerateWeekSessions(
   // session, and the progression engine stays out (no block evaluation, no write). Without one the
   // continuous mode — and the legacy race mode around a lone race — runs unchanged.
   const today = parseIsoDate(todayIsoDate());
-  const { data: flagRows, error: flagError } = await db
-    .from("subjective_entries")
-    .select("entry_date")
-    .eq("user_id", userId)
-    .gte("pain_score", RACE_PAIN_WARNING_MIN_SCORE)
-    .gte("entry_date", isoDate(addDays(today, -42)));
-  if (flagError) return { error: flagError.message, status: 500 };
+  let flaggedDates: Date[];
+  try {
+    flaggedDates = (await loadDebriefSignals(db, userId, isoDate(addDays(today, -42)), isoDate(today)))
+      .filter((s) => s.painScore >= RACE_PAIN_WARNING_MIN_SCORE)
+      .map((s) => s.entryDate);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err), status: 500 };
+  }
   const { calibration: baseCalibration } = await loadAthleteCalibration(db, userId);
   const resolvedPlan = resolveRacePlanWeek({
     races,
@@ -248,7 +250,7 @@ export async function regenerateWeekSessions(
         isRace: isRaceActivity({ startTime, distanceKm, eventType: (a as { event_type?: string | null }).event_type }, races),
       };
     }),
-    flaggedDates: (flagRows ?? []).map((r) => parseIsoDate(r.entry_date)),
+    flaggedDates,
     easyPaceSecPerKm: baseCalibration.easyPaceSecPerKm,
   });
   const racePlan = resolvedPlan?.input ?? null;
@@ -299,21 +301,25 @@ export async function regenerateWeekSessions(
     if (stateError) return { error: stateError.message, status: 500 };
   }
 
-  // Recent subjective entries, for the <48h-before-session downgrade check.
-  const entriesCutoff = addDays(weekStart, -10);
-  const { data: entries, error: entriesError } = await db
-    .from("subjective_entries")
-    .select("entry_date, pain_score, energy_score")
-    .eq("user_id", userId)
-    .gte("entry_date", isoDate(entriesCutoff))
-    .lte("entry_date", isoDate(addDays(weekStart, 6)));
-  if (entriesError) return { error: entriesError.message, status: 500 };
-
-  const subjectiveEntries: SubjectiveSignal[] = (entries ?? []).map((e) => ({
-    entryDate: parseIsoDate(e.entry_date),
-    painScore: e.pain_score ?? 0,
-    energyScore: e.energy_score ?? 3,
-  }));
+  // Recent debriefs, for the <48h-before-session downgrade check and the pain / gait quality block.
+  // (subjective_entries stays in the database for history but no longer feeds the planner.)
+  const weekEnd = addDays(weekStart, 6);
+  let subjectiveEntries: SubjectiveSignal[];
+  let qualityBlock: string | null;
+  try {
+    const todayIso = isoDate(today);
+    await resolveStaleEpisodes(db, userId, todayIso);
+    const loaded = await loadDebriefPlannerInput(
+      db,
+      userId,
+      isoDate(addDays(weekStart, -10)),
+      isoDate(weekEnd) < todayIso ? isoDate(weekEnd) : todayIso
+    );
+    subjectiveEntries = loaded.signals;
+    qualityBlock = loaded.qualityBlock;
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err), status: 500 };
+  }
 
   const cycleWeekNumber = fullWeeksBetween(state.cycleStartDate, weekStart) + 1;
   // Race-based paces (Riegel heuristics from the latest result) join the fitted easy pace and HR zones.
@@ -406,6 +412,7 @@ export async function regenerateWeekSessions(
     longRunMinutes: state.longRunMinutes,
     calibration,
     subjectiveEntries,
+    qualityBlock,
     availableDays,
     slotOverrides,
     keptSessions,

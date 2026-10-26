@@ -21,7 +21,7 @@ import type {
 import { hrHint, type HeartRateZones } from "./zones";
 import { RACE_PLAN_CONFIG } from "./config";
 import { addDays } from "./dates";
-import { decideDowngrade, findApplicableSignal, shouldAddStrides } from "./subjective";
+import { decideDowngrade, findApplicableSignal, shouldAddStrides, type DowngradeAction } from "./subjective";
 import {
   buildNonImpactEasySession,
   buildNonImpactThresholdSession,
@@ -1547,10 +1547,17 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
     longRunMinutes,
     calibration,
     subjectiveEntries,
+    qualityBlock = null,
     availableDays,
     slotOverrides,
     keptSessions = [],
   } = input;
+
+  /** Downgrade rules for a quality slot, plus the debrief-driven block: pain or a gait change turns it into an easy run. */
+  const decideQuality = (role: SessionKind, signal: SubjectiveSignal | null): DowngradeAction => {
+    const decision = decideDowngrade(role, signal);
+    return decision.type === "none" && qualityBlock ? { type: "toEasy", reason: qualityBlock } : decision;
+  };
 
   // Race mode overrides durations and roles for the weeks around a race (race.ts);
   // the race week itself has its own placement.
@@ -1679,7 +1686,7 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
       }
 
       // slot.role === "quality"
-      const decision = decideDowngrade(role, signal);
+      const decision = decideQuality(role, signal);
       if (decision.type === "rest") return buildRestSession(userId, plannedDate, role, decision.reason);
       if (decision.type === "toEasy") {
         return buildNonImpactEasySession(
@@ -1767,10 +1774,10 @@ export function buildWeekPlan(input: PlannerInput): WeekPlan {
     }
 
     // slot.role === "quality" (running)
-    const decision = decideDowngrade(role, signal);
+    const decision = decideQuality(role, signal);
     if (decision.type === "rest") return buildRestSession(userId, plannedDate, role, decision.reason);
     if (decision.type === "toEasy") {
-      const addStrides = shouldAddStrides(signal);
+      const addStrides = !qualityBlock && shouldAddStrides(signal);
       return buildEasySession(
         userId,
         plannedDate,

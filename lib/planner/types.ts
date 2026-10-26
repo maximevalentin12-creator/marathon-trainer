@@ -191,7 +191,7 @@ export interface RacePlanWeekInput {
   qualityLevel: number;
 }
 
-/** A subjective_entries row, trimmed to what the downgrade rules need. */
+/** A debrief (or legacy subjective_entries row), trimmed to what the downgrade rules need. */
 export interface SubjectiveSignal {
   entryDate: Date;
   painScore: number;
@@ -223,8 +223,10 @@ export interface PlannerInput {
   longRunMinutes: number;
   /** The athlete's HR zones and paces (lib/athlete/profile.ts loadAthleteCalibration). */
   calibration: AthleteCalibration;
-  /** Recent subjective_entries, used to find the most recent one <48h before each session (§2). */
+  /** Recent debriefs as signals, used to find the most recent one <48h before each session (§2). */
   subjectiveEntries: SubjectiveSignal[];
+  /** Set (to the note shown) when recent pain or a gait change blocks quality sessions — they become easy runs. */
+  qualityBlock?: string | null;
   /** Days the user is available to train, 0=Mon..6=Sun. Must have at least runsPerWeek + nonImpactSessions entries. */
   availableDays: number[];
   /**
