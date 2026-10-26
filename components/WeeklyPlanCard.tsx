@@ -14,6 +14,9 @@ import {
 } from "@/lib/planner";
 import { wearLevel, WEAR_DOT_CLASS } from "@/lib/shoes";
 import CompletionCartouche from "@/components/CompletionCartouche";
+import DebriefSheet, { DEBRIEF_SAVED_EVENT, type DebriefTarget } from "@/components/DebriefSheet";
+import type { DebriefView } from "@/lib/debrief/types";
+import { zoneWithSideFr } from "@/lib/debrief/labels";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +57,8 @@ interface SessionRow {
   why_note: string | null;
   completed: boolean;
   skipped: boolean;
+  garmin_activity_id?: number | null;
+  debrief?: DebriefView | null;
   actual: ActualStats | null;
   completion_score: number | null;
   completion_note: string | null;
@@ -223,6 +228,7 @@ function SessionCard({
   onReset,
   onSkip,
   onSetShoe,
+  onDebrief,
 }: {
   session: SessionRow;
   weekStartIso: string;
@@ -235,6 +241,7 @@ function SessionCard({
   onReset: (sessionId: string) => void;
   onSkip: (sessionId: string, skipped: boolean) => void;
   onSetShoe: (sessionId: string, shoeId: string | null) => void;
+  onDebrief: (session: SessionRow) => void;
 }) {
   const isRest = session.session_type === "rest";
   const isRace = session.session_type === "race";
@@ -310,6 +317,19 @@ function SessionCard({
         <ShoePicker session={session} shoes={shoes} disabled={settingShoe} onSetShoe={onSetShoe} />
       )}
 
+      {session.completed &&
+        (session.debrief ? (
+          <DebriefSummary debrief={session.debrief} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => onDebrief(session)}
+            className="mb-3 w-full min-h-[44px] rounded-lg border border-green-700 text-sm font-medium text-green-800 hover:bg-green-50"
+          >
+            Faire le débrief
+          </button>
+        ))}
+
       {session.skipped && (
         <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 mb-3">
           <span className="shrink-0 text-[10px] uppercase tracking-wide text-red-700 bg-white border border-red-200 rounded px-1.5 py-0.5">
@@ -342,9 +362,19 @@ function SessionCard({
       {session.strides_added && (
         <p className="text-[11px] text-gray-400 mt-2">Bonne énergie récente → lignes droites ajoutées en fin de séance.</p>
       )}
-      {session.downgrade_reason && (
-        <p className="text-[11px] text-amber-600 mt-2">Adaptée : {session.downgrade_reason}</p>
-      )}
+      {session.downgrade_reason &&
+        (/^douleur/i.test(session.downgrade_reason) ? (
+          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+            <span className="font-medium">
+              {session.session_type === "rest"
+                ? "Repos à cause de ta douleur. "
+                : "Séance modifiée à cause de ta douleur. "}
+            </span>
+            {session.downgrade_reason}
+          </p>
+        ) : (
+          <p className="text-[11px] text-amber-600 mt-2">Adaptée : {session.downgrade_reason}</p>
+        ))}
 
       {!isRest && (
         <div className="mt-3 pt-2.5 border-t border-gray-100 flex items-center justify-between gap-2 flex-wrap">
@@ -386,6 +416,29 @@ function SessionCard({
       {session.day_override_dropped && (
         <p className="text-[11px] text-amber-600 mt-2">
           Jour déplacé — le jour choisi n&apos;est plus disponible cette semaine.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function DebriefSummary({ debrief }: { debrief: DebriefView }) {
+  const items = [
+    `Effort ${debrief.effort}/10`,
+    `Jambes ${debrief.legs}/5`,
+    `Énergie ${debrief.energy}/5`,
+    `Plaisir ${debrief.enjoyment}/5`,
+  ];
+  return (
+    <div className="mb-3 rounded-md border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600">
+      <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-0.5">Débrief</p>
+      <p>{items.join(" · ")}</p>
+      {debrief.hasPain && (
+        <p className="text-amber-700 mt-0.5">
+          Douleur :{" "}
+          {debrief.pain.length > 0
+            ? debrief.pain.map((p) => `${zoneWithSideFr(p.zone, p.side).toLowerCase()} ${p.intensity}/10`).join(", ")
+            : "signalée"}
         </p>
       )}
     </div>
@@ -607,6 +660,7 @@ export default function WeeklyPlanCard() {
   const [editing, setEditing] = useState(false);
   const [movingSessionId, setMovingSessionId] = useState<string | null>(null);
   const [settingShoeSessionId, setSettingShoeSessionId] = useState<string | null>(null);
+  const [debriefTarget, setDebriefTarget] = useState<DebriefTarget | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -635,6 +689,13 @@ export default function WeeklyPlanCard() {
     void load();
     void loadShoes();
   }, [load, loadShoes]);
+
+  // A debrief saved from the "Aujourd'hui" banner (or this card) refreshes the sessions and any pain-driven downgrade.
+  useEffect(() => {
+    const reload = () => void load();
+    window.addEventListener(DEBRIEF_SAVED_EVENT, reload);
+    return () => window.removeEventListener(DEBRIEF_SAVED_EVENT, reload);
+  }, [load]);
 
   async function handleGenerate(
     runsPerWeek: number,
@@ -854,6 +915,14 @@ export default function WeeklyPlanCard() {
                   onReset={handleReset}
                   onSkip={handleSkip}
                   onSetShoe={handleSetShoe}
+                  onDebrief={(row) =>
+                    setDebriefTarget({
+                      garminActivityId: row.garmin_activity_id ?? null,
+                      plannedSessionId: row.id,
+                      date: row.planned_date,
+                      label: `${row.session_label ?? KIND_LABEL[row.session_type]} · ${fmtDay(row.planned_date)}`,
+                    })
+                  }
                 />
               );
             })}
@@ -862,6 +931,7 @@ export default function WeeklyPlanCard() {
           {week && <ZoneLegend zones={week.zones} />}
         </>
       )}
+      {debriefTarget && <DebriefSheet target={debriefTarget} onClose={() => setDebriefTarget(null)} />}
     </div>
   );
 }

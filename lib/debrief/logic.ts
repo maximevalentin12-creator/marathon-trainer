@@ -1,7 +1,15 @@
 // Pure debrief / injury-episode rules — no I/O, unit-tested in logic.test.ts.
 
 import type { SubjectiveSignal } from "@/lib/planner/types";
-import type { DebriefSummary, InjuryEpisode, InjurySide, InjuryZone } from "./types";
+import {
+  INJURY_ZONES,
+  type DebriefInput,
+  type DebriefSummary,
+  type InjuryEpisode,
+  type InjurySide,
+  type InjuryZone,
+  type PainReportInput,
+} from "./types";
 
 /** An open episode with no new report for this many days is resolved. */
 export const EPISODE_AUTO_RESOLVE_DAYS = 14;
@@ -70,4 +78,53 @@ export function qualityBlockNote(debriefs: DebriefSummary[], openEpisodes: Injur
     sorted[0].maxIntensity >= BLOCKING_PAIN_INTENSITY &&
     sorted[1].maxIntensity >= BLOCKING_PAIN_INTENSITY;
   return gait || twoInARow ? PROFESSIONAL_NOTE : null;
+}
+
+function intIn(v: unknown, min: number, max: number): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
+}
+
+/** Validates a request body into a DebriefInput; the second element is a French error message. */
+export function parseDebriefInput(body: unknown): [DebriefInput, null] | [null, string] {
+  const b = (body ?? {}) as Record<string, unknown>;
+  if (typeof b.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(b.date)) return [null, "Date invalide."];
+  if (!intIn(b.effort, 1, 10)) return [null, "L'effort doit être entre 1 et 10."];
+  if (!intIn(b.legs, 1, 5) || !intIn(b.energy, 1, 5) || !intIn(b.enjoyment, 1, 5)) {
+    return [null, "Jambes, énergie et plaisir doivent être entre 1 et 5."];
+  }
+  const pain: PainReportInput[] = [];
+  if (b.pain != null) {
+    if (!Array.isArray(b.pain)) return [null, "Douleurs invalides."];
+    for (const raw of b.pain as Record<string, unknown>[]) {
+      if (
+        typeof raw?.zone !== "string" || !(INJURY_ZONES as readonly string[]).includes(raw.zone) ||
+        !["left", "right", "both"].includes(raw.side as string) ||
+        !intIn(raw.intensity, 0, 10) ||
+        !["before", "during", "after"].includes(raw.onset as string)
+      ) {
+        return [null, "Douleur invalide."];
+      }
+      pain.push({
+        zone: raw.zone as InjuryZone,
+        side: raw.side as InjurySide,
+        intensity: raw.intensity,
+        onset: raw.onset as PainReportInput["onset"],
+        affectsGait: raw.affectsGait === true,
+      });
+    }
+  }
+  return [
+    {
+      garminActivityId: typeof b.garminActivityId === "number" ? b.garminActivityId : null,
+      plannedSessionId: typeof b.plannedSessionId === "string" ? b.plannedSessionId : null,
+      date: b.date,
+      effort: b.effort,
+      legs: b.legs,
+      energy: b.energy,
+      enjoyment: b.enjoyment,
+      notes: typeof b.notes === "string" ? b.notes : null,
+      pain,
+    },
+    null,
+  ];
 }

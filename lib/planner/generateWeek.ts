@@ -8,7 +8,8 @@ import type { Db } from "@/lib/supabase";
 import { pushUserSessions } from "@/lib/google/sync";
 import { loadAthleteCalibration } from "@/lib/athlete/profile";
 import { loadRaces, attachRacePainWarnings } from "@/lib/races";
-import { loadDebriefPlannerInput, loadDebriefSignals, resolveStaleEpisodes } from "@/lib/debrief";
+import type { DebriefView } from "@/lib/debrief";
+import { loadDebriefViews, loadDebriefPlannerInput, loadDebriefSignals, resolveStaleEpisodes } from "@/lib/debrief";
 import {
   buildWeekPlan,
   computeLongRunAnchorMinutes,
@@ -75,11 +76,12 @@ type ServiceClient = Db;
  * Adds `actual` (the linked Garmin activity's distance/duration/pace) to each
  * planned_sessions row — the shape GET /api/plan/week and the week card use.
  */
-export async function attachActualActivities<T extends { garmin_activity_id?: number | null }>(
+export async function attachActualActivities<T extends { id?: string; garmin_activity_id?: number | null }>(
   db: ServiceClient,
   userId: string,
   sessions: T[]
-): Promise<Array<T & { actual: ActualActivity | null }>> {
+): Promise<Array<T & { actual: ActualActivity | null; debrief: DebriefView | null }>> {
+  const debriefs = await loadDebriefViews(db, userId, sessions);
   const activityIds = sessions.map((s) => s.garmin_activity_id).filter((id): id is number => id != null);
 
   const activityMap = new Map<
@@ -104,6 +106,7 @@ export async function attachActualActivities<T extends { garmin_activity_id?: nu
     const activity = s.garmin_activity_id != null ? activityMap.get(s.garmin_activity_id) : undefined;
     return {
       ...s,
+      debrief: (s.id && debriefs.get(s.id)) || null,
       actual: activity
         ? {
             distanceKm: activity.distance_meters != null ? Math.round(activity.distance_meters / 100) / 10 : null,

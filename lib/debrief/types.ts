@@ -43,6 +43,34 @@ export interface InjuryEpisode {
   affectsGait: boolean;
 }
 
+/** A filled debrief as the cards show it. */
+export interface DebriefView {
+  id: string;
+  effort: number;
+  legs: number;
+  energy: number;
+  enjoyment: number;
+  hasPain: boolean;
+  /** Pain zones reported on this debrief, with the intensity (0-10). */
+  pain: { zone: InjuryZone; side: InjurySide; intensity: number }[];
+}
+
+/** A synced activity still waiting for its debrief. */
+export interface PendingDebrief {
+  garminActivityId: number;
+  plannedSessionId: string | null;
+  /** YYYY-MM-DD. */
+  date: string;
+  label: string;
+  durationMinutes: number | null;
+  distanceKm: number | null;
+}
+
+export interface InjuryEpisodeHistory extends InjuryEpisode {
+  notes: string | null;
+  reports: { date: string; intensity: number; onset: PainOnset; affectsGait: boolean }[];
+}
+
 /** A debrief reduced to what the planner needs. */
 export interface DebriefSummary {
   /** YYYY-MM-DD. */

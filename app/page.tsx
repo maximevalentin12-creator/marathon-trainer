@@ -2,6 +2,7 @@ import WeeklyPlanCard from "@/components/WeeklyPlanCard";
 import WeeklyMileageCard from "@/components/WeeklyMileageCard";
 import MonthlyCounter from "@/components/MonthlyCounter";
 import NextRaceCard from "@/components/NextRaceCard";
+import DebriefBanner from "@/components/DebriefBanner";
 
 export default function Home() {
   return (
@@ -9,6 +10,8 @@ export default function Home() {
       <header className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight">Aujourd&apos;hui</h1>
       </header>
+
+      <DebriefBanner />
 
       <MonthlyCounter />
 

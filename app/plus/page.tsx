@@ -2,6 +2,7 @@ import GarminSyncCard from "@/components/GarminSyncCard";
 import CsvImportCard from "@/components/CsvImportCard";
 import MonthlyReportCard from "@/components/MonthlyReportCard";
 import SignOutButton from "@/components/SignOutButton";
+import InjuryEpisodesCard from "@/components/InjuryEpisodesCard";
 
 const LINKS = [
   { href: "/shoes", title: "L'armoire", text: "Tes paires, leurs kilomètres et leur usure." },
@@ -34,6 +35,13 @@ export default function PlusPage() {
           </li>
         ))}
       </ul>
+
+      <h2 className="text-sm font-semibold text-gray-700 mb-2 px-1">Santé</h2>
+      <div className="mb-6">
+        <Card title="Mes douleurs">
+          <InjuryEpisodesCard />
+        </Card>
+      </div>
 
       <h2 className="text-sm font-semibold text-gray-700 mb-2 px-1">Données</h2>
       <div className="space-y-4">

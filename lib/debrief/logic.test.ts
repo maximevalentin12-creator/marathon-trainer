@@ -4,6 +4,7 @@ import {
   PROFESSIONAL_NOTE,
   findOpenEpisode,
   legacyPainScore,
+  parseDebriefInput,
   qualityBlockNote,
   staleEpisodes,
 } from "./logic";
@@ -61,4 +62,14 @@ test("gait impact blocks quality, via the latest debrief or an open episode", ()
   assert.equal(qualityBlockNote([debrief("2026-10-12", 2, true)], []), PROFESSIONAL_NOTE);
   assert.equal(qualityBlockNote([], [episode({ affectsGait: true })]), PROFESSIONAL_NOTE);
   assert.equal(qualityBlockNote([], [episode({ affectsGait: true, resolvedOn: "2026-10-05" })]), null);
+});
+
+test("parseDebriefInput validates ranges and pain reports", () => {
+  const ok = { date: "2026-10-26", effort: 6, legs: 3, energy: 4, enjoyment: 5 };
+  const [input] = parseDebriefInput({ ...ok, pain: [{ zone: "calf", side: "left", intensity: 4, onset: "during", affectsGait: true }] });
+  assert.equal(input?.pain?.[0].affectsGait, true);
+  assert.equal(parseDebriefInput({ ...ok, effort: 11 })[0], null);
+  assert.equal(parseDebriefInput({ ...ok, legs: 0 })[0], null);
+  assert.equal(parseDebriefInput({ ...ok, pain: [{ zone: "elbow", side: "left", intensity: 4, onset: "during" }] })[0], null);
+  assert.deepEqual(parseDebriefInput(ok)[0]?.pain, []);
 });
