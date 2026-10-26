@@ -121,6 +121,104 @@ function Slider({
   );
 }
 
+const MAX_PAINS = 2;
+
+interface PainDraft {
+  zone: InjuryZone | null;
+  side: InjurySide | null;
+  intensity: number;
+  onset: PainOnset | null;
+  affectsGait: boolean;
+}
+
+const newPain = (): PainDraft => ({ zone: null, side: null, intensity: 3, onset: null, affectsGait: false });
+
+const needsSide = (p: PainDraft) => p.zone !== null && p.zone !== "back" && p.zone !== "other";
+const painComplete = (p: PainDraft) => p.zone !== null && (!needsSide(p) || p.side !== null) && p.onset !== null;
+
+function PainForm({
+  title,
+  draft,
+  onChange,
+  onRemove,
+}: {
+  title: string | null;
+  draft: PainDraft;
+  onChange: (next: PainDraft) => void;
+  onRemove: (() => void) | null;
+}) {
+  const set = (patch: Partial<PainDraft>) => onChange({ ...draft, ...patch });
+  return (
+    <div className="space-y-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+      {(title || onRemove) && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-800">{title}</span>
+          {onRemove && (
+            <button type="button" onClick={onRemove} className="min-h-[44px] px-2 text-xs text-gray-500 underline">
+              Retirer
+            </button>
+          )}
+        </div>
+      )}
+      <div>
+        <span className="block text-sm font-medium text-gray-800 mb-1.5">Où ?</span>
+        <div className="grid grid-cols-3 gap-1.5">
+          {INJURY_ZONES.map((z) => (
+            <Choice key={z} selected={draft.zone === z} onClick={() => set({ zone: z })}>
+              {ZONE_LABEL_FR[z]}
+            </Choice>
+          ))}
+        </div>
+      </div>
+
+      {needsSide(draft) && (
+        <div>
+          <span className="block text-sm font-medium text-gray-800 mb-1.5">Quel côté ?</span>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(["left", "right", "both"] as const).map((sd) => (
+              <Choice key={sd} selected={draft.side === sd} onClick={() => set({ side: sd })}>
+                {SIDE_LABEL_FR[sd]}
+              </Choice>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <Slider
+        title="Intensité"
+        value={draft.intensity}
+        min={0}
+        max={10}
+        hint="Gêne légère|Insupportable"
+        onChange={(v) => set({ intensity: v })}
+      />
+
+      <div>
+        <span className="block text-sm font-medium text-gray-800 mb-1.5">Elle est apparue…</span>
+        <div className="grid grid-cols-3 gap-1.5">
+          {(["before", "during", "after"] as const).map((o) => (
+            <Choice key={o} selected={draft.onset === o} onClick={() => set({ onset: o })} className="text-xs">
+              {ONSET_LABEL_FR[o]}
+            </Choice>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <span className="block text-sm font-medium text-gray-800 mb-1.5">Elle change ta foulée ?</span>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Choice selected={!draft.affectsGait} onClick={() => set({ affectsGait: false })}>
+            Non
+          </Choice>
+          <Choice selected={draft.affectsGait} onClick={() => set({ affectsGait: true })}>
+            Oui, je boite / je compense
+          </Choice>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DebriefSheet({
   target,
   onClose,
@@ -135,18 +233,13 @@ export default function DebriefSheet({
   const [energy, setEnergy] = useState(3);
   const [enjoyment, setEnjoyment] = useState(3);
   const [hasPain, setHasPain] = useState(false);
-  const [zone, setZone] = useState<InjuryZone | null>(null);
-  const [side, setSide] = useState<InjurySide | null>(null);
-  const [intensity, setIntensity] = useState(3);
-  const [onset, setOnset] = useState<PainOnset | null>(null);
-  const [affectsGait, setAffectsGait] = useState(false);
+  const [pains, setPains] = useState<PainDraft[]>([newPain()]);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const needsSide = zone !== null && zone !== "back" && zone !== "other";
-  const painComplete = zone !== null && (!needsSide || side !== null) && onset !== null;
-  const canSave = !saving && (!hasPain || painComplete);
+  const allPainComplete = pains.every(painComplete);
+  const canSave = !saving && (!hasPain || allPainComplete);
 
   async function save() {
     setSaving(true);
@@ -164,7 +257,15 @@ export default function DebriefSheet({
           energy,
           enjoyment,
           notes: notes.trim() || null,
-          pain: hasPain && zone && onset ? [{ zone, side: needsSide ? side : "both", intensity, onset, affectsGait }] : [],
+          pain: hasPain
+            ? pains.map((p) => ({
+                zone: p.zone,
+                side: needsSide(p) ? p.side : "both",
+                intensity: p.intensity,
+                onset: p.onset,
+                affectsGait: p.affectsGait,
+              }))
+            : [],
         }),
       });
       const data = await r.json();
@@ -228,56 +329,26 @@ export default function DebriefSheet({
           </div>
 
           {hasPain && (
-            <div className="space-y-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
-              <div>
-                <span className="block text-sm font-medium text-gray-800 mb-1.5">Où ?</span>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {INJURY_ZONES.map((z) => (
-                    <Choice key={z} selected={zone === z} onClick={() => setZone(z)}>
-                      {ZONE_LABEL_FR[z]}
-                    </Choice>
-                  ))}
-                </div>
-              </div>
-
-              {needsSide && (
-                <div>
-                  <span className="block text-sm font-medium text-gray-800 mb-1.5">Quel côté ?</span>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {(["left", "right", "both"] as const).map((s) => (
-                      <Choice key={s} selected={side === s} onClick={() => setSide(s)}>
-                        {SIDE_LABEL_FR[s]}
-                      </Choice>
-                    ))}
-                  </div>
-                </div>
+            <>
+              {pains.map((p, i) => (
+                <PainForm
+                  key={i}
+                  title={pains.length > 1 ? `Douleur ${i + 1}` : null}
+                  draft={p}
+                  onChange={(next) => setPains((all) => all.map((d, j) => (j === i ? next : d)))}
+                  onRemove={i > 0 ? () => setPains((all) => all.filter((_, j) => j !== i)) : null}
+                />
+              ))}
+              {pains.length < MAX_PAINS && (
+                <button
+                  type="button"
+                  onClick={() => setPains((all) => [...all, newPain()])}
+                  className="w-full min-h-[44px] rounded-lg border border-dashed border-gray-300 text-sm text-gray-600 hover:border-gray-500"
+                >
+                  + Une autre zone douloureuse
+                </button>
               )}
-
-              <Slider title="Intensité" value={intensity} min={0} max={10} hint="Gêne légère|Insupportable" onChange={setIntensity} />
-
-              <div>
-                <span className="block text-sm font-medium text-gray-800 mb-1.5">Elle est apparue…</span>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {(["before", "during", "after"] as const).map((o) => (
-                    <Choice key={o} selected={onset === o} onClick={() => setOnset(o)} className="text-xs">
-                      {ONSET_LABEL_FR[o]}
-                    </Choice>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <span className="block text-sm font-medium text-gray-800 mb-1.5">Elle change ta foulée ?</span>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <Choice selected={!affectsGait} onClick={() => setAffectsGait(false)}>
-                    Non
-                  </Choice>
-                  <Choice selected={affectsGait} onClick={() => setAffectsGait(true)}>
-                    Oui, je boite / je compense
-                  </Choice>
-                </div>
-              </div>
-            </div>
+            </>
           )}
 
           <details className="text-sm">
@@ -302,7 +373,7 @@ export default function DebriefSheet({
           disabled={!canSave}
           className="mt-5 w-full min-h-[48px] rounded-lg bg-green-700 text-white text-sm font-medium disabled:opacity-40"
         >
-          {saving ? "Enregistrement…" : hasPain && !painComplete ? "Précise la douleur pour enregistrer" : "Enregistrer"}
+          {saving ? "Enregistrement…" : hasPain && !allPainComplete ? "Précise la douleur pour enregistrer" : "Enregistrer"}
         </button>
       </div>
     </div>

@@ -1379,9 +1379,14 @@ export function applyLiveDowngrade(params: {
   currentDurationMinutes: number;
   easyMinutes: number;
   calibration: AthleteCalibration;
-  signal: SubjectiveSignal;
+  signal: SubjectiveSignal | null;
+  /** Debrief-driven block (pain / gait): a quality session becomes an easy run even without a fresh signal. */
+  qualityBlock?: string | null;
 }): PlannedSession | null {
-  const decision = decideDowngrade(params.kind, params.signal);
+  let decision = decideDowngrade(params.kind, params.signal);
+  if (decision.type === "none" && params.qualityBlock && (params.kind === "threshold" || params.kind === "vo2max")) {
+    decision = { type: "toEasy", reason: params.qualityBlock };
+  }
   if (decision.type === "none") return null;
 
   if (decision.type === "rest") {
@@ -1401,7 +1406,7 @@ export function applyLiveDowngrade(params: {
         decision.reason
       );
     }
-    const addStrides = shouldAddStrides(params.signal);
+    const addStrides = !params.qualityBlock && shouldAddStrides(params.signal);
     return buildEasySession(
       params.userId,
       params.plannedDate,
