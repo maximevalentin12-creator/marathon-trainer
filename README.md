@@ -96,6 +96,7 @@ npm run build                                 # production build
 2. Environment variables (Project → Settings → Environment Variables, Production):
    - Required, public: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
    - Optional, server-only — only for Google Calendar: `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `APP_BASE_URL`.
+   - Optional, for push notifications: `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (public), `VAPID_PRIVATE_KEY` (server-only), `VAPID_SUBJECT` (optional `mailto:`, defaults to the signed-in email). Generate with `npx web-push generate-vapid-keys`.
    - Not needed on Vercel: `GARMIN_USERNAME`, `GARMIN_PASSWORD` (local use only).
 3. Deploy, open the URL and sign in.
 

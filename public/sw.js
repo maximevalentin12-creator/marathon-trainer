@@ -30,3 +30,34 @@ self.addEventListener("fetch", (event) => {
       .catch(() => caches.match(event.request))
   );
 });
+
+// Web push. iOS requires every push to show a notification, so a missing or garbled payload still shows a default one.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    // Not JSON: fall back to the defaults below.
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Marathon", {
+      body: data.body || "",
+      icon: "/icons/icon-192.png",
+      tag: data.tag,
+      data: { url: data.url || "/" },
+    })
+  );
+});
+
+// Focus the app if it is already open (and send it to the target), otherwise open the target.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((w) => new URL(w.url).origin === self.location.origin);
+      if (!open) return self.clients.openWindow(target);
+      return open.focus().then((c) => (c && c.url !== target && "navigate" in c ? c.navigate(target) : c));
+    })
+  );
+});
